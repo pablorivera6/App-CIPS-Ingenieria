@@ -3,3 +3,8 @@ pandas
 numpy
 openpyxl
 altair
+geopandas
+shapely
+pyproj
+scikit-learn
+fiona
