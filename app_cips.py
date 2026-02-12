@@ -155,81 +155,73 @@ with st.sidebar:
         archivo_zip = os.path.join(carpeta, "ductos.zip")
         archivo_nombres = os.path.join(carpeta, "nombres.csv")
         
-        # 1. LEER CSV DE NOMBRES (CORRECCIÓN DE TILDES)
+        # 1. LEER CSV DE NOMBRES (ROBUST DE PANDAS)
         df_maestro = pd.DataFrame()
         if os.path.exists(archivo_nombres):
             try:
-                # INTENTO 1: UTF-8-SIG (Corrige tildes de Excel) + Separador Coma
+                # Usamos quoting=3 (QUOTE_NONE) para ignorar las comillas de Excel que rompen todo
+                # Usamos on_bad_lines='skip' para saltar filas dañadas
                 df_maestro = pd.read_csv(
                     archivo_nombres, 
-                    header=0, 
-                    dtype=str, 
                     sep=',', 
                     quoting=3, 
                     on_bad_lines='skip', 
-                    encoding='utf-8-sig'
+                    encoding='utf-8' # Tu archivo parece ser UTF-8
                 )
                 
-                # INTENTO 2: Si falló la separación, probar Punto y Coma
-                if len(df_maestro.columns) < 3:
-                     df_maestro = pd.read_csv(
-                        archivo_nombres, 
-                        header=0, 
-                        dtype=str, 
-                        sep=';', 
-                        quoting=3, 
-                        on_bad_lines='skip', 
-                        encoding='utf-8-sig'
-                    )
-
-                # INTENTO 3 (Último recurso): Latin-1 (para Excel viejos)
-                if len(df_maestro.columns) < 3:
-                     df_maestro = pd.read_csv(
-                        archivo_nombres, 
-                        header=0, 
-                        dtype=str, 
-                        sep=';', 
-                        quoting=3, 
-                        on_bad_lines='skip', 
-                        encoding='latin-1'
-                    )
-
-                # VALIDACIÓN FINAL
-                if len(df_maestro.columns) >= 3:
+                # Intentamos identificar tus columnas: ID TRAMO, TRAMO, DISTRITO
+                # Normalizamos nombres de columnas (quitamos espacios y comillas)
+                df_maestro.columns = df_maestro.columns.str.strip().str.replace('"', '')
+                
+                # Mapeo manual si las columnas se llaman como en tu archivo
+                if "ID TRAMO" in df_maestro.columns and "TRAMO" in df_maestro.columns and "DISTRITO" in df_maestro.columns:
+                     df_maestro = df_maestro.rename(columns={
+                         "ID TRAMO": "Archivo",
+                         "TRAMO": "Nombre",
+                         "DISTRITO": "Distrito"
+                     })
+                
+                # Si falló el renombre, intentamos por posición (Columnas 0, 1, 2)
+                elif len(df_maestro.columns) >= 3:
                     df_maestro = df_maestro.iloc[:, [0, 1, 2]]
                     df_maestro.columns = ["Archivo", "Nombre", "Distrito"]
-                    # Limpieza
-                    df_maestro["Archivo"] = df_maestro["Archivo"].fillna("").astype(str).str.strip().str.replace('"', '')
-                    df_maestro["Archivo"] = df_maestro["Archivo"].apply(lambda x: x if str(x).lower().endswith(".gpkg") else f"{x}.gpkg")
-                else:
-                    st.warning("⚠️ Formato CSV no reconocido (revise separadores).")
-                    df_maestro = pd.DataFrame()
+
+                # Limpieza Profunda de Texto (Quitar comillas residuales)
+                for col in ["Archivo", "Nombre", "Distrito"]:
+                     df_maestro[col] = df_maestro[col].astype(str).str.replace('"', '').str.strip()
+
+                # Asegurar extensión .gpkg
+                df_maestro["Archivo"] = df_maestro["Archivo"].apply(lambda x: x if str(x).lower().endswith(".gpkg") else f"{x}.gpkg")
 
             except Exception as e:
-                st.error(f"Error lectura: {e}")
+                st.error(f"Error procesando CSV: {e}")
 
         # 2. MENU EN CASCADA
         if not df_maestro.empty and os.path.exists(archivo_zip):
             lista_distritos = sorted(df_maestro["Distrito"].dropna().unique())
-            distrito_sel = st.selectbox("1. Distrito:", lista_distritos)
             
-            df_filtrado = df_maestro[df_maestro["Distrito"] == distrito_sel]
-            opciones = dict(zip(df_filtrado["Nombre"], df_filtrado["Archivo"]))
-            
-            if opciones:
-                nombre_sel = st.selectbox("2. Infraestructura:", sorted(opciones.keys()))
-                archivo_real = opciones[nombre_sel]
+            if lista_distritos:
+                distrito_sel = st.selectbox("1. Distrito:", lista_distritos)
                 
-                ruta_absoluta_zip = os.path.abspath(archivo_zip)
-                ruta_final_ducto = f"zip://{ruta_absoluta_zip}!{archivo_real}"
-                st.success(f"✅ Seleccionado: {nombre_sel}")
+                df_filtrado = df_maestro[df_maestro["Distrito"] == distrito_sel]
+                opciones = dict(zip(df_filtrado["Nombre"], df_filtrado["Archivo"]))
+                
+                if opciones:
+                    nombre_sel = st.selectbox("2. Infraestructura:", sorted(opciones.keys()))
+                    archivo_real = opciones[nombre_sel]
+                    
+                    ruta_absoluta_zip = os.path.abspath(archivo_zip)
+                    ruta_final_ducto = f"zip://{ruta_absoluta_zip}!{archivo_real}"
+                    st.success(f"✅ Seleccionado: {nombre_sel}")
+                else:
+                    st.warning("Sin datos para este distrito.")
             else:
-                st.warning("Sin datos.")
+                st.warning("El archivo CSV no tiene distritos válidos.")
             
         else:
             # FALLBACK
             if os.path.exists(archivo_zip):
-                st.warning("⚠️ Usando nombres de archivo (CSV no disponible).")
+                st.warning("⚠️ Modo Archivos (CSV no leído correctamente).")
                 try:
                     with zipfile.ZipFile(archivo_zip, 'r') as z:
                         lista = [f for f in z.namelist() if f.endswith('.gpkg') and not f.startswith('__MACOSX')]
