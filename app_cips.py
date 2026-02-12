@@ -79,7 +79,7 @@ def procesar_geospacial(df, df_dcp, ruta_lectura_ducto, umbral_outlier):
         df["X"], df["Y"] = t.transform(df["Long"].values, df["Lat"].values)
         gdf = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.X, df.Y), crs=3857)
 
-        # D. CARGAR DUCTO (INTELIGENTE: ZIP o ARCHIVO)
+        # D. CARGAR DUCTO
         try:
             ducto = gpd.read_file(ruta_lectura_ducto)
         except Exception as e:
@@ -150,33 +150,76 @@ with st.sidebar:
     ruta_final_ducto = None
     
     if modo == "Avanzado (Con Ducto LRS)":
-        st.info("Ajusta coordenadas al ducto real.")
+        st.info("Ajuste LRS con Selección por Distrito.")
         
-        # BUSQUEDA AUTOMÁTICA EN ZIP
+        # Rutas de archivos
         carpeta = "ductos"
         archivo_zip = os.path.join(carpeta, "ductos.zip")
+        archivo_nombres = os.path.join(carpeta, "nombres.csv")
         
-        lista_ductos = []
-        es_zip = False
+        # 1. LEER CSV DE NOMBRES
+        # Asumimos que tiene encabezado en la fila 1 (header=0)
+        # Columnas esperadas: A=Archivo, B=Nombre, C=Distrito
+        df_maestro = pd.DataFrame()
         
-        if os.path.exists(archivo_zip):
+        if os.path.exists(archivo_nombres):
             try:
-                with zipfile.ZipFile(archivo_zip, 'r') as z:
-                    # Filtramos solo archivos .gpkg válidos
-                    lista_ductos = [f for f in z.namelist() if f.endswith('.gpkg') and not f.startswith('__MACOSX')]
-                es_zip = True
-            except:
-                st.error("Error leyendo ductos.zip")
-        
-        if lista_ductos:
-            seleccion = st.selectbox("Seleccione Ducto:", sorted(lista_ductos))
+                # header=0 salta la primera fila (títulos)
+                df_maestro = pd.read_csv(archivo_nombres, header=0, dtype=str)
+                
+                # Si tiene al menos 3 columnas, las usamos
+                if len(df_maestro.columns) >= 3:
+                    # Renombramos para asegurar consistencia interna
+                    df_maestro = df_maestro.iloc[:, [0, 1, 2]]
+                    df_maestro.columns = ["Archivo", "Nombre", "Distrito"]
+                    
+                    # Limpieza de espacios y extensiones
+                    df_maestro["Archivo"] = df_maestro["Archivo"].fillna("").astype(str).str.strip()
+                    df_maestro["Archivo"] = df_maestro["Archivo"].apply(lambda x: x if str(x).lower().endswith(".gpkg") else f"{x}.gpkg")
+                else:
+                    st.error("El CSV debe tener 3 columnas: Archivo, Nombre, Distrito.")
+            except Exception as e:
+                st.error(f"Error leyendo nombres.csv: {e}")
+
+        # 2. MENU EN CASCADA
+        if not df_maestro.empty and os.path.exists(archivo_zip):
             
-            if es_zip:
-                # TRUCO: Ruta virtual para leer dentro del ZIP
+            # FILTRO 1: DISTRITO
+            lista_distritos = sorted(df_maestro["Distrito"].dropna().unique())
+            distrito_sel = st.selectbox("1. Seleccione Distrito:", lista_distritos)
+            
+            # FILTRO 2: TUBERÍA (Solo las de ese distrito)
+            df_filtrado = df_maestro[df_maestro["Distrito"] == distrito_sel]
+            
+            # Diccionario {Nombre Bonito : Nombre Archivo}
+            opciones = dict(zip(df_filtrado["Nombre"], df_filtrado["Archivo"]))
+            
+            if opciones:
+                nombre_sel = st.selectbox("2. Seleccione Infraestructura:", sorted(opciones.keys()))
+                archivo_real = opciones[nombre_sel]
+                
+                # Construir ruta ZIP
                 ruta_absoluta_zip = os.path.abspath(archivo_zip)
-                ruta_final_ducto = f"zip://{ruta_absoluta_zip}!{seleccion}"
+                ruta_final_ducto = f"zip://{ruta_absoluta_zip}!{archivo_real}"
+                
+                # Pequeña confirmación visual
+                st.caption(f"📍 Cargando mapa: `{archivo_real}`")
+            else:
+                st.warning("No hay tuberías en este distrito.")
+            
         else:
-            st.warning("⚠️ No se encontró 'ductos.zip' en la carpeta 'ductos'.")
+            # FALLBACK: Si falla el CSV, lee directo del ZIP
+            if os.path.exists(archivo_zip):
+                try:
+                    with zipfile.ZipFile(archivo_zip, 'r') as z:
+                        lista = [f for f in z.namelist() if f.endswith('.gpkg') and not f.startswith('__MACOSX')]
+                    sel = st.selectbox("Seleccione Archivo (Modo Directo):", sorted(lista))
+                    ruta_absoluta_zip = os.path.abspath(archivo_zip)
+                    ruta_final_ducto = f"zip://{ruta_absoluta_zip}!{sel}"
+                except:
+                    st.error("Error leyendo ZIP.")
+            else:
+                 st.error("⚠️ Faltan archivos en la carpeta 'ductos'.")
 
     else:
         st.subheader("Tramo Manual")
