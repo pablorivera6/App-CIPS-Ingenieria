@@ -155,58 +155,43 @@ with st.sidebar:
         archivo_zip = os.path.join(carpeta, "ductos.zip")
         archivo_nombres = os.path.join(carpeta, "nombres.csv")
         
-        # 1. LEER CSV DE NOMBRES (ESTRATEGIA DOBLE: ; o ,)
+        # --- LECTURA NUCLEAR DE CSV (POR POSICIÓN, SIN NOMBRES) ---
         df_maestro = pd.DataFrame()
         
         if os.path.exists(archivo_nombres):
             try:
-                # INTENTO A: Separador PUNTO Y COMA (;) -> Típico Excel Español
-                df_maestro = pd.read_csv(
-                    archivo_nombres, 
-                    sep=';', 
-                    quoting=3, 
-                    on_bad_lines='skip', 
-                    encoding='utf-8'
-                )
+                # 1. Leer SIN encabezados (header=None) para que Pandas no se confunda con títulos
+                # Probar punto y coma (;)
+                df_temp = pd.read_csv(archivo_nombres, sep=';', header=None, dtype=str, on_bad_lines='skip', encoding='latin-1')
                 
-                # Si falló (solo detectó 1 columna), probamos INTENTO B: COMA (,)
-                if len(df_maestro.columns) < 2:
-                    df_maestro = pd.read_csv(
-                        archivo_nombres, 
-                        sep=',', 
-                        quoting=3, 
-                        on_bad_lines='skip', 
-                        encoding='utf-8'
-                    )
+                # Si falló, probar coma (,)
+                if df_temp.shape[1] < 2:
+                    df_temp = pd.read_csv(archivo_nombres, sep=',', header=None, dtype=str, on_bad_lines='skip', encoding='latin-1')
 
-                # --- LIMPIEZA DE COLUMNAS ---
-                # Quitamos espacios y comillas de los nombres de las columnas
-                df_maestro.columns = df_maestro.columns.str.strip().str.replace('"', '')
-
-                # BUSCAR COLUMNAS POR NOMBRE O POSICIÓN
-                # Si están los nombres exactos que me diste:
-                if "ID TRAMO" in df_maestro.columns and "TRAMO" in df_maestro.columns and "DISTRITO" in df_maestro.columns:
-                     df_maestro = df_maestro.rename(columns={
-                         "ID TRAMO": "Archivo",
-                         "TRAMO": "Nombre",
-                         "DISTRITO": "Distrito"
-                     })
-                # Si no, usamos las 3 primeras columnas (0, 1, 2)
-                elif len(df_maestro.columns) >= 3:
-                    df_maestro = df_maestro.iloc[:, [0, 1, 2]]
-                    df_maestro.columns = ["Archivo", "Nombre", "Distrito"]
-
-                # --- LIMPIEZA DE DATOS ---
-                if not df_maestro.empty:
-                    for col in ["Archivo", "Nombre", "Distrito"]:
-                        # Convertir a texto, quitar comillas y espacios
-                        df_maestro[col] = df_maestro[col].astype(str).str.replace('"', '').str.strip()
+                # 2. Verificar si tenemos al menos 3 columnas
+                if df_temp.shape[1] >= 3:
+                    # 3. Eliminar la primera fila SI parece ser un título (Si dice "ID" o "TRAMO")
+                    primer_valor = str(df_temp.iloc[0,0]).upper()
+                    if "ID" in primer_valor or "TRAMO" in primer_valor or "ARCHIVO" in primer_valor:
+                        df_temp = df_temp.iloc[1:] # Borramos la fila 0 (títulos)
+                    
+                    # 4. ASIGNACIÓN POR POSICIÓN (ESTO NO FALLA)
+                    # Columna 0 -> Archivo
+                    # Columna 1 -> Nombre Bonito
+                    # Columna 2 -> Distrito
+                    df_maestro["Archivo"] = df_temp.iloc[:, 0].astype(str).str.strip().str.replace('"', '')
+                    df_maestro["Nombre"] = df_temp.iloc[:, 1].astype(str).str.strip().str.replace('"', '')
+                    df_maestro["Distrito"] = df_temp.iloc[:, 2].astype(str).str.strip().str.replace('"', '')
                     
                     # Asegurar extensión .gpkg
                     df_maestro["Archivo"] = df_maestro["Archivo"].apply(lambda x: x if str(x).lower().endswith(".gpkg") else f"{x}.gpkg")
+                
+                else:
+                    st.error(f"El archivo CSV tiene solo {df_temp.shape[1]} columnas. Se necesitan 3 (Archivo, Nombre, Distrito).")
+                    st.write("Vista previa de lo que leyó Python:", df_temp.head()) # Ayuda visual si falla
 
             except Exception as e:
-                st.error(f"Error leyendo nombres.csv: {e}")
+                st.error(f"Error leyendo CSV: {e}")
 
         # 2. MENU EN CASCADA
         if not df_maestro.empty and os.path.exists(archivo_zip):
@@ -216,92 +201,5 @@ with st.sidebar:
                 distrito_sel = st.selectbox("1. Distrito:", lista_distritos)
                 
                 df_filtrado = df_maestro[df_maestro["Distrito"] == distrito_sel]
-                opciones = dict(zip(df_filtrado["Nombre"], df_filtrado["Archivo"]))
-                
-                if opciones:
-                    nombre_sel = st.selectbox("2. Infraestructura:", sorted(opciones.keys()))
-                    archivo_real = opciones[nombre_sel]
-                    
-                    ruta_absoluta_zip = os.path.abspath(archivo_zip)
-                    ruta_final_ducto = f"zip://{ruta_absoluta_zip}!{archivo_real}"
-                    st.caption(f"📍 Archivo: `{archivo_real}`")
-                else:
-                    st.warning("Sin datos para este distrito.")
-            else:
-                st.warning("⚠️ No se encontraron distritos válidos en el CSV.")
-            
-        else:
-            # FALLBACK (PLAN B)
-            if os.path.exists(archivo_zip):
-                st.warning("⚠️ CSV no leído. Mostrando lista directa del ZIP.")
-                try:
-                    with zipfile.ZipFile(archivo_zip, 'r') as z:
-                        lista = [f for f in z.namelist() if f.endswith('.gpkg') and not f.startswith('__MACOSX')]
-                    sel = st.selectbox("Archivo:", sorted(lista))
-                    ruta_absoluta_zip = os.path.abspath(archivo_zip)
-                    ruta_final_ducto = f"zip://{ruta_absoluta_zip}!{sel}"
-                except: pass
-            else:
-                 st.error("Faltan archivos en la carpeta 'ductos'.")
-
-    else:
-        st.subheader("Tramo Manual")
-        pk_a = st.number_input("PK 1", value=14000.0)
-        pk_b = st.number_input("PK 2", value=15000.0)
-        sentido = st.radio("Sentido", ["Ascendente", "Contraflujo"])
-
-    st.divider()
-    umbral = st.slider("Umbral Limpieza (mV)", 10, 300, 100)
-
-# --- 6. INTERFAZ ---
-archivo = st.file_uploader("📂 Cargar Excel (Survey Data)", type=['xlsx'])
-
-if archivo and st.button("🚀 PROCESAR"):
-    with st.spinner("Procesando..."):
-        try:
-            df_raw = pd.read_excel(archivo, sheet_name=0)
-            df_dcp = pd.read_excel(archivo, sheet_name='DCP Data') if 'DCP Data' in pd.ExcelFile(archivo).sheet_names else pd.DataFrame()
-        except:
-            st.error("Error al leer el archivo Excel cargado. Verifique que no esté dañado."); st.stop()
-
-        if modo == "Avanzado (Con Ducto LRS)":
-            if ruta_final_ducto:
-                df_final, logs = procesar_geospacial(df_raw, df_dcp, ruta_final_ducto, umbral)
-                with st.expander("Detalles del Proceso", expanded=True):
-                    for m in logs: st.write(m)
-                if df_final is None: st.stop()
-            else:
-                st.error("⚠️ Falta seleccionar un ducto en el menú lateral."); st.stop()
-        else:
-            # Modo Básico
-            df_final = df_raw.copy()
-            df_final = df_final.rename(columns={"On Voltage": "On_V", "Off Voltage": "Off_V"})
-            df_final["On_mV"] = df_final["On_V"] * 1000
-            df_final["Off_mV"] = df_final["Off_V"] * 1000
-            
-            pks = np.linspace(min(pk_a, pk_b), max(pk_a, pk_b), len(df_final))
-            if sentido == "Contraflujo": pks = pks[::-1]
-            df_final["Station No"] = np.round(pks, 2)
-            
-            for c in ["On_mV", "Off_mV"]:
-                m = df_final[c].rolling(15, center=True).median()
-                df_final.loc[np.abs(df_final[c]-m)>umbral, c] = m[np.abs(df_final[c]-m)>umbral]
-
-        # Gráfica
-        st.subheader("📊 Perfil de Potenciales")
-        data = df_final[['Station No', 'On_mV', 'Off_mV']].melt('Station No', var_name='Tipo', value_name='mV')
-        chart = alt.Chart(data).mark_line().encode(
-            x=alt.X('Station No', title='Distancia (m)'),
-            y=alt.Y('mV', scale=alt.Scale(zero=False)),
-            color=alt.Color('Tipo', scale=alt.Scale(range=['#004E98', '#B8233E'])),
-            tooltip=['Station No', 'mV']
-        ).interactive()
-        st.altair_chart(chart, use_container_width=True)
-
-        # Descarga
-        out = io.BytesIO()
-        with pd.ExcelWriter(out, engine="openpyxl") as w:
-            df_final.to_excel(w, sheet_name="Survey Data", index=False)
-            if not df_dcp.empty:
-                df_dcp.to_excel(w, sheet_name="DCP Data", index=False)
-        st.download_button("📥 DESCARGAR REPORTE", out, "CIPS_Procesado.xlsx", "application/vnd.ms-excel", type="primary")
+                # Crear diccionario
+                opciones = dict(zip(df_
