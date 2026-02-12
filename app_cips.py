@@ -10,6 +10,7 @@ from shapely.ops import linemerge
 from pyproj import Transformer
 from sklearn.linear_model import LinearRegression
 import zipfile
+import csv # Nueva librería para manejar errores de texto
 
 # --- 1. CONFIGURACIÓN ---
 st.set_page_config(page_title="Portal Ingeniería CIPS", page_icon="⚡", layout="wide")
@@ -152,70 +153,88 @@ with st.sidebar:
     if modo == "Avanzado (Con Ducto LRS)":
         st.info("Ajuste LRS con Selección por Distrito.")
         
-        # Rutas de archivos
         carpeta = "ductos"
         archivo_zip = os.path.join(carpeta, "ductos.zip")
         archivo_nombres = os.path.join(carpeta, "nombres.csv")
         
-        # 1. LEER CSV DE NOMBRES
-        # Asumimos que tiene encabezado en la fila 1 (header=0)
-        # Columnas esperadas: A=Archivo, B=Nombre, C=Distrito
+        # 1. LEER CSV DE NOMBRES (BLINDADO CONTRA ERRORES)
         df_maestro = pd.DataFrame()
         
         if os.path.exists(archivo_nombres):
             try:
-                # header=0 salta la primera fila (títulos)
+                # INTENTO 1: Lectura normal UTF-8
                 df_maestro = pd.read_csv(archivo_nombres, header=0, dtype=str)
-                
-                # Si tiene al menos 3 columnas, las usamos
+            except:
+                try:
+                    # INTENTO 2: Lectura ignorando comillas (FIX PARA ERROR ROW 187)
+                    # quoting=3 significa CSV.QUOTE_NONE (ignora las comillas)
+                    # on_bad_lines='skip' salta filas dañadas
+                    # encoding='latin-1' ayuda si viene de Excel antiguo
+                    df_maestro = pd.read_csv(
+                        archivo_nombres, 
+                        header=0, 
+                        dtype=str, 
+                        quoting=3, 
+                        on_bad_lines='skip', 
+                        encoding='latin-1'
+                    )
+                except Exception as e:
+                    st.error(f"⚠️ Error crítico leyendo nombres.csv: {e}")
+
+            # Limpieza y validación de columnas
+            if not df_maestro.empty:
+                # Asegurar que tenemos al menos 3 columnas
                 if len(df_maestro.columns) >= 3:
-                    # Renombramos para asegurar consistencia interna
+                    # Nos quedamos con las 3 primeras sin importar el nombre
                     df_maestro = df_maestro.iloc[:, [0, 1, 2]]
                     df_maestro.columns = ["Archivo", "Nombre", "Distrito"]
                     
-                    # Limpieza de espacios y extensiones
-                    df_maestro["Archivo"] = df_maestro["Archivo"].fillna("").astype(str).str.strip()
+                    # Limpieza de texto
+                    df_maestro["Archivo"] = df_maestro["Archivo"].fillna("").astype(str).str.strip().str.replace('"', '')
                     df_maestro["Archivo"] = df_maestro["Archivo"].apply(lambda x: x if str(x).lower().endswith(".gpkg") else f"{x}.gpkg")
                 else:
-                    st.error("El CSV debe tener 3 columnas: Archivo, Nombre, Distrito.")
-            except Exception as e:
-                st.error(f"Error leyendo nombres.csv: {e}")
+                    st.warning("⚠️ El archivo nombres.csv no tiene las 3 columnas esperadas. Se usará modo básico.")
+                    df_maestro = pd.DataFrame() # Vaciar para activar fallback
 
         # 2. MENU EN CASCADA
         if not df_maestro.empty and os.path.exists(archivo_zip):
             
             # FILTRO 1: DISTRITO
             lista_distritos = sorted(df_maestro["Distrito"].dropna().unique())
-            distrito_sel = st.selectbox("1. Seleccione Distrito:", lista_distritos)
-            
-            # FILTRO 2: TUBERÍA (Solo las de ese distrito)
-            df_filtrado = df_maestro[df_maestro["Distrito"] == distrito_sel]
-            
-            # Diccionario {Nombre Bonito : Nombre Archivo}
-            opciones = dict(zip(df_filtrado["Nombre"], df_filtrado["Archivo"]))
-            
-            if opciones:
-                nombre_sel = st.selectbox("2. Seleccione Infraestructura:", sorted(opciones.keys()))
-                archivo_real = opciones[nombre_sel]
+            if lista_distritos:
+                distrito_sel = st.selectbox("1. Seleccione Distrito:", lista_distritos)
                 
-                # Construir ruta ZIP
-                ruta_absoluta_zip = os.path.abspath(archivo_zip)
-                ruta_final_ducto = f"zip://{ruta_absoluta_zip}!{archivo_real}"
+                # FILTRO 2: TUBERÍA
+                df_filtrado = df_maestro[df_maestro["Distrito"] == distrito_sel]
+                opciones = dict(zip(df_filtrado["Nombre"], df_filtrado["Archivo"]))
                 
-                # Pequeña confirmación visual
-                st.caption(f"📍 Cargando mapa: `{archivo_real}`")
+                if opciones:
+                    nombre_sel = st.selectbox("2. Seleccione Infraestructura:", sorted(opciones.keys()))
+                    archivo_real = opciones[nombre_sel]
+                    
+                    # RUTA ZIP
+                    ruta_absoluta_zip = os.path.abspath(archivo_zip)
+                    ruta_final_ducto = f"zip://{ruta_absoluta_zip}!{archivo_real}"
+                    st.caption(f"📍 Mapa: `{archivo_real}`")
+                else:
+                    st.warning("No hay tuberías en este distrito.")
             else:
-                st.warning("No hay tuberías en este distrito.")
+                st.warning("No se detectaron distritos en el archivo.")
             
         else:
-            # FALLBACK: Si falla el CSV, lee directo del ZIP
+            # FALLBACK: Si falla el CSV, lee directo del ZIP (PLAN B)
             if os.path.exists(archivo_zip):
+                st.info("ℹ️ Usando listado directo del ZIP (nombres.csv no disponible o dañado).")
                 try:
                     with zipfile.ZipFile(archivo_zip, 'r') as z:
                         lista = [f for f in z.namelist() if f.endswith('.gpkg') and not f.startswith('__MACOSX')]
-                    sel = st.selectbox("Seleccione Archivo (Modo Directo):", sorted(lista))
-                    ruta_absoluta_zip = os.path.abspath(archivo_zip)
-                    ruta_final_ducto = f"zip://{ruta_absoluta_zip}!{sel}"
+                    
+                    if lista:
+                        sel = st.selectbox("Seleccione Archivo (Modo Directo):", sorted(lista))
+                        ruta_absoluta_zip = os.path.abspath(archivo_zip)
+                        ruta_final_ducto = f"zip://{ruta_absoluta_zip}!{sel}"
+                    else:
+                        st.error("El ZIP no contiene archivos .gpkg")
                 except:
                     st.error("Error leyendo ZIP.")
             else:
