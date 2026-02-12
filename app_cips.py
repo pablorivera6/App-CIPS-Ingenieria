@@ -10,7 +10,6 @@ from shapely.ops import linemerge
 from pyproj import Transformer
 from sklearn.linear_model import LinearRegression
 import zipfile
-import csv # Nueva librería para manejar errores de texto
 
 # --- 1. CONFIGURACIÓN ---
 st.set_page_config(page_title="Portal Ingeniería CIPS", page_icon="⚡", layout="wide")
@@ -142,103 +141,88 @@ def procesar_geospacial(df, df_dcp, ruta_lectura_ducto, umbral_outlier):
     except Exception as e:
         return None, [f"❌ Error Crítico: {str(e)}"]
 
-# --- 5. BARRA LATERAL ---
+# --- 5. BARRA LATERAL (DIAGNÓSTICO Y CARGA) ---
 with st.sidebar:
     st.header("⚙️ Configuración")
     
     modo = st.radio("Modo:", ["Básico (Manual)", "Avanzado (Con Ducto LRS)"])
-
     ruta_final_ducto = None
     
     if modo == "Avanzado (Con Ducto LRS)":
-        st.info("Ajuste LRS con Selección por Distrito.")
+        st.info("Modo Inteligente Activado")
         
+        # --- SECCIÓN DE DIAGNÓSTICO (PARA ENCONTRAR ERRORES) ---
         carpeta = "ductos"
         archivo_zip = os.path.join(carpeta, "ductos.zip")
         archivo_nombres = os.path.join(carpeta, "nombres.csv")
         
-        # 1. LEER CSV DE NOMBRES (BLINDADO CONTRA ERRORES)
-        df_maestro = pd.DataFrame()
+        # Verificar si la carpeta existe
+        if not os.path.exists(carpeta):
+            st.error(f"❌ La carpeta '{carpeta}' NO existe en GitHub.")
+            st.stop()
         
+        # Verificar si el ZIP existe
+        if not os.path.exists(archivo_zip):
+            st.error(f"❌ No se encuentra 'ductos.zip'. Archivos encontrados en 'ductos/': {os.listdir(carpeta)}")
+            st.stop()
+
+        # 1. LEER CSV DE NOMBRES (INTELIGENTE: PRUEBA COMA Y PUNTO Y COMA)
+        df_maestro = pd.DataFrame()
         if os.path.exists(archivo_nombres):
             try:
-                # INTENTO 1: Lectura normal UTF-8
-                df_maestro = pd.read_csv(archivo_nombres, header=0, dtype=str)
-            except:
-                try:
-                    # INTENTO 2: Lectura ignorando comillas (FIX PARA ERROR ROW 187)
-                    # quoting=3 significa CSV.QUOTE_NONE (ignora las comillas)
-                    # on_bad_lines='skip' salta filas dañadas
-                    # encoding='latin-1' ayuda si viene de Excel antiguo
-                    df_maestro = pd.read_csv(
-                        archivo_nombres, 
-                        header=0, 
-                        dtype=str, 
-                        quoting=3, 
-                        on_bad_lines='skip', 
-                        encoding='latin-1'
-                    )
-                except Exception as e:
-                    st.error(f"⚠️ Error crítico leyendo nombres.csv: {e}")
-
-            # Limpieza y validación de columnas
-            if not df_maestro.empty:
-                # Asegurar que tenemos al menos 3 columnas
+                # Intento 1: Separador Coma (Estándar)
+                df_maestro = pd.read_csv(archivo_nombres, header=0, dtype=str, sep=',', quoting=3, on_bad_lines='skip', encoding='latin-1')
+                if len(df_maestro.columns) < 3:
+                    # Intento 2: Separador Punto y Coma (Excel Español)
+                    df_maestro = pd.read_csv(archivo_nombres, header=0, dtype=str, sep=';', quoting=3, on_bad_lines='skip', encoding='latin-1')
+                
+                # Validación final
                 if len(df_maestro.columns) >= 3:
-                    # Nos quedamos con las 3 primeras sin importar el nombre
                     df_maestro = df_maestro.iloc[:, [0, 1, 2]]
                     df_maestro.columns = ["Archivo", "Nombre", "Distrito"]
-                    
-                    # Limpieza de texto
+                    # Limpieza
                     df_maestro["Archivo"] = df_maestro["Archivo"].fillna("").astype(str).str.strip().str.replace('"', '')
                     df_maestro["Archivo"] = df_maestro["Archivo"].apply(lambda x: x if str(x).lower().endswith(".gpkg") else f"{x}.gpkg")
                 else:
-                    st.warning("⚠️ El archivo nombres.csv no tiene las 3 columnas esperadas. Se usará modo básico.")
-                    df_maestro = pd.DataFrame() # Vaciar para activar fallback
+                    st.warning(f"⚠️ El CSV tiene {len(df_maestro.columns)} columnas. Se requieren 3.")
+                    df_maestro = pd.DataFrame()
+            except Exception as e:
+                st.error(f"Error leyendo CSV: {e}")
 
         # 2. MENU EN CASCADA
-        if not df_maestro.empty and os.path.exists(archivo_zip):
-            
-            # FILTRO 1: DISTRITO
+        if not df_maestro.empty:
             lista_distritos = sorted(df_maestro["Distrito"].dropna().unique())
-            if lista_distritos:
-                distrito_sel = st.selectbox("1. Seleccione Distrito:", lista_distritos)
+            distrito_sel = st.selectbox("1. Distrito:", lista_distritos)
+            
+            df_filtrado = df_maestro[df_maestro["Distrito"] == distrito_sel]
+            opciones = dict(zip(df_filtrado["Nombre"], df_filtrado["Archivo"]))
+            
+            if opciones:
+                nombre_sel = st.selectbox("2. Infraestructura:", sorted(opciones.keys()))
+                archivo_real = opciones[nombre_sel]
                 
-                # FILTRO 2: TUBERÍA
-                df_filtrado = df_maestro[df_maestro["Distrito"] == distrito_sel]
-                opciones = dict(zip(df_filtrado["Nombre"], df_filtrado["Archivo"]))
-                
-                if opciones:
-                    nombre_sel = st.selectbox("2. Seleccione Infraestructura:", sorted(opciones.keys()))
-                    archivo_real = opciones[nombre_sel]
-                    
-                    # RUTA ZIP
-                    ruta_absoluta_zip = os.path.abspath(archivo_zip)
-                    ruta_final_ducto = f"zip://{ruta_absoluta_zip}!{archivo_real}"
-                    st.caption(f"📍 Mapa: `{archivo_real}`")
-                else:
-                    st.warning("No hay tuberías en este distrito.")
+                ruta_absoluta_zip = os.path.abspath(archivo_zip)
+                ruta_final_ducto = f"zip://{ruta_absoluta_zip}!{archivo_real}"
+                st.success(f"✅ Listo para procesar: {nombre_sel}")
             else:
-                st.warning("No se detectaron distritos en el archivo.")
+                st.warning("Sin datos para este distrito.")
             
         else:
-            # FALLBACK: Si falla el CSV, lee directo del ZIP (PLAN B)
-            if os.path.exists(archivo_zip):
-                st.info("ℹ️ Usando listado directo del ZIP (nombres.csv no disponible o dañado).")
-                try:
-                    with zipfile.ZipFile(archivo_zip, 'r') as z:
-                        lista = [f for f in z.namelist() if f.endswith('.gpkg') and not f.startswith('__MACOSX')]
-                    
-                    if lista:
-                        sel = st.selectbox("Seleccione Archivo (Modo Directo):", sorted(lista))
-                        ruta_absoluta_zip = os.path.abspath(archivo_zip)
-                        ruta_final_ducto = f"zip://{ruta_absoluta_zip}!{sel}"
-                    else:
-                        st.error("El ZIP no contiene archivos .gpkg")
-                except:
-                    st.error("Error leyendo ZIP.")
-            else:
-                 st.error("⚠️ Faltan archivos en la carpeta 'ductos'.")
+            # FALLBACK: Lectura directa del ZIP
+            st.warning("⚠️ Usando modo directo (CSV no leído correctamente).")
+            try:
+                with zipfile.ZipFile(archivo_zip, 'r') as z:
+                    # Buscar archivos recursivamente
+                    lista = [f for f in z.namelist() if f.endswith('.gpkg') and not f.startswith('__MACOSX')]
+                
+                if lista:
+                    sel = st.selectbox("Seleccione Archivo del ZIP:", sorted(lista))
+                    ruta_absoluta_zip = os.path.abspath(archivo_zip)
+                    ruta_final_ducto = f"zip://{ruta_absoluta_zip}!{sel}"
+                else:
+                    st.error("El ZIP está vacío o no tiene archivos .gpkg")
+            except Exception as e:
+                st.error(f"Error abriendo ZIP: {e}")
 
     else:
         st.subheader("Tramo Manual")
