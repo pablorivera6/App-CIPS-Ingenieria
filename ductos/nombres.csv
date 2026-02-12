@@ -1,0 +1,279 @@
+﻿ID TRAMO;TRAMO;DISTRITO
+A_BDB;Aislado Brisas de Bolívar;D1
+A_CSNP;Aislado Cantagallo - San Pablo;D1
+A_GTMB4;"Aislado Estación Galán - Termobarranca  4""";D1
+A_GTMB6;"Aislado Estación Galán - Termobarranca  6""";D1
+A_GY;Aislado Estación Galán - Yondó;D1
+A_SNVP;Aislado San Vicente de Chucuri;D1
+A_YM;Aislado Yopal - Morichal;D4
+A_YWIL;Aislado Yariguies -Puerto Wilches;D1
+L_ARML;LOOP Armenia;D8
+L_BEVV;LOOP La Belleza - Vasconia;D1
+L_BEVV;LOOP La Belleza - Vasconia;D3
+L_LCEP;LOOP Cusiana - Miraflores;D4
+L_LCEP;LOOP Cusiana - Miraflores;D5
+L_MIPG;LOOP Miraflores - Puente Guillermo;D5
+L_PGLB;Loop Puente Guillermo – La Belleza;D5
+L_PORMI;Loop Porvenir - Miraflores;D5
+L_PRHV;Loop Puerto Romero - Hub Vasconia;D1
+R_ACA;Ramal Acacías Madigas-Acacías Llanogas;D4
+R_AGU;Ramal Aguachica  PK 424+920;D1
+R_AGUZ;Ramal Aguazul ;D4
+R_AIP;Ramal Aipe  PK 543+400;D2
+R_ALB;Ramal Albania;D3
+R_ALV;Ramal Alvarado  PK 371+600;D2
+R_AMB;Ramal Ambalema;D2
+R_AMR;Ramal EDS Amarillos;D1
+R_AND;Ramal Andalucía;D8
+R_ANS;Ramal Ansermanuevo;D7
+R_ARC;Ramal Arcabuco;D5
+R_ARM;Ramal Armenia;D7
+R_BAL;Ramal Balboa;D7
+R_BAN;Ramal El Banco;D6
+R_BAR;Ramal Barbosa;D5
+R_BARR;Ramal Barrancas;D6
+R_BEC;Ramal Becerril;D6
+R_BGAZ;Ramal EDS Buga Gazel;D8
+R_BGL;Ramal EDS Buga Guadalajara;D8
+R_BLC;Ramal Belencito  PK 85+200;D5
+R_BLG;Ramal Bugalagrande;D8
+R_BLN;Ramal Belén  29+100 (PK 69+950);D5
+R_BOLI;Ramal Bolívar;D5
+R_BRC;Ramal Briceño;D3
+R_BUG;Ramal Buga;D8
+R_BUR;Ramal El Burro PK 359+751;D6
+R_CAI;Ramal Caicedonia PK 218+846;D8
+R_CAP;Ramal Capellanía;D3
+R_CAQ;Ramal Cáqueza;D4
+R_CAR;Ramal Cartago;D8
+R_CAS;Ramal Casacará;D6
+R_CEL;Ramal La Celia;D7
+R_CER;Ramal El Cerrito;D8
+R_CEZ;Ramal Cerinza;D5
+R_CGCAS;Ramal Castilla PK 470+600;D2
+R_CHI;Ramal Chicoral  PK 421+240;D2
+R_CHIN;Ramal Chinchiná;D7
+R_CHIPQ;Ramal Chipaque;D4
+R_CHIPT;Ramal Chipatá;D5
+R_CHIR;Ramal Chiriguaná;D6
+R_CHQ;Ramal Chiquinquirá;D3
+R_CHT;Ramal Chitaraque;D5
+R_CHV;Ramal Chivata;D5
+R_CIB;Ramal CIB ECP;D1
+R_CIR;Ramal Circasia  (PK 7+641);D7
+R_CLD;Ramal Caldas;D3
+R_CLR;Ramal Calarcá ;D7
+R_CMX;Ramal Cemex  PK 402+300;D2
+R_COD;Ramal Agustín Codazzi  214+547;D6
+R_COM;Ramal Cómbita;D5
+R_CUB;Ramal Cucunubá;D3
+R_CUC;Ramal Cucaita;D5
+R_CUM;Ramal Cumaral   (8+500);D4
+R_CUR;Ramal Curumaní;D6
+R_DCO;Ramal Diaco  PK 42+100;D5
+R_DOI;Ramal Doima;D2
+R_DOQ;Ramal Dos Quebradas;D7
+R_DOR;Ramal La Dorada  (9+600);D2
+R_DUI;Ramal Duitama;D5
+R_EBAR;Ramal EDS Barbosa  PK 21+420;D5
+R_ECCAN;Ramal Ecopetrol - Cantagallo;D1
+R_EDSMON;Ramal EDS Montearroyo;D5
+R_EDSUBA;Ramal EDS Ubaté;D3
+R_EDV;Ramal EDS Valledupar;D6
+R_ELM;Ramal El Molino;D6
+R_EMC;Ramal EDS Madigas;D4
+R_EPR;Ramal El Prado  (16+000);D2
+R_FIL;Ramal Filandia;D7
+R_FLN;Ramal Florián  PK 6+953;D3
+R_FLO;Ramal Floresta;D5
+R_FLOR;Ramal Florida;D8
+R_FON;Ramal Fonseca  PK 105+529;D6
+R_FOR;Ramal Fortalecillas  Pk 7+611;D2
+R_FOS;Ramal Fosca;D4
+R_FRE;Ramal Fresno  PK19+140;D7
+R_FUQ;Ramal Fuquene;D3
+R_GAM;Ramal Gamarra;D1
+R_GBA;Ramal Gases de Barrancabermeja;D1
+R_GCC;Ramal EDS Buga Cañaduzal;D8
+R_GIN;Ramal Ginebra;D8
+R_GMO;Ramal Guamo  PK 440+325;D2
+R_GSM;Ramal GNV Sol San Martin;D5
+R_GUA;Ramal Gualanday;D2
+R_GUAC;Ramal Guacarí  PK 306+081;D8
+R_GUAT;Ramal Guatancuy;D3
+R_GUAY;Ramal Guayabetal  PK 62+530;D4
+R_GUE;Ramal Guepsa ;D5
+R_GVT;Ramal Guavatá  9+250;D5
+R_GYV;Ramal Guayabal  PK 313+053;D2
+R_HAT;Ramal Hato Nuevo;D6
+R_HER;Ramal Herveo  PK 50+978;D7
+R_HOC;Ramal Hocol;D2
+R_HON;Ramal Honda;D2
+R_IBA;Ramal Ibagué  PK 401+100;D2
+R_IBI;Ramal La Jagua de Ibirico;D6
+R_IMPRO;Ramal Improarroz  PK 19+120;D4
+R_JAM;Ramal Jamundí;D8
+R_JEN;Ramal Jenesano;D5
+R_JMA;Ramal Jesús María;D5
+R_LAB;Ramal La Belleza;D3
+R_LDL;Ramal Cogua (ladrilleras)  PK 114+954;D3
+R_LEN;Ramal Lenguazaque  PK 70+500;D3
+R_LER;Ramal Lérida  PK 336+740;D2
+R_LGL;Ramal La Gloria;D6
+R_LIB;Ramal Líbano;D2
+R_LMT;Ramal La Mata;D6
+R_LPAI;Ramal La Paila;D8
+R_LPAL;Ramal Palmita PK 281+508;D6
+R_LVIC;Ramal La Victoria;D2
+R_MACO;Ramal Maria Conchita;D5
+R_MAR;Ramal Marsella;D7
+R_MAY;Ramal Maya;D4
+R_MAZ;Ramal Manzanares   PK 24+044;D7
+R_MIR;Ramal Miraflores  PK 82+767;D5
+R_MNT;Troncal Montañuelo-Gualanday;D2
+R_MNZ;Ramal Manizales  (3+154);D7
+R_MON;Ramal Montenegro ;D7
+R_MONI;Ramal Moniquirá;D5
+R_MONT;Ramal Monterrey;D4
+R_MOR;Ramal Moriche  PK  154+700;D1
+R_MOT;Ramal Motavita  PK 15+800;D5
+R_MRQ;Ramal Mariquita  PK 293+100;D2
+R_NAT;Ramal Natagaima  PK 493+100;D2
+R_NEIR;Ramal Neira;D7
+R_NEM;Ramal Nemocón;D3
+R_NOB;Ramal Nobsa;D5
+R_OIC;Ramal Oicatá;D5
+R_PAE;Ramal Páez  PK 67+896;D5
+R_PAI;Ramal Paipa;D5
+R_PAIL;Ramal Pailitas;D6
+R_PALE;Ramal Palestina  PK 107+608;D7
+R_PAP;Ramal Papayal;D6
+R_PAR;Ramal Paratebueno;D4
+R_PAZ;Ramal La Paz;D6
+R_PBOY;Ramal Puerto Boyaca ;D1
+R_PCA;Ramal EDS Puerto Caldas;D7
+R_PDR;Ramal Paz del Rio - Belencito;D5
+R_PEL;Ramal Pelaya;D6
+R_PER;Ramal Pereira   PK 153+406;D7
+R_PIE;Ramal Piedras;D2
+R_PORF;Ramal Ciudad Porfía  PK 34+142;D4
+R_PPAR;Ramal Puerto Parra;D1
+R_PRD;Ramal Pradera  PK 37+422;D8
+R_PSER;Ramal Puerto Serviez  PK 150+002;D1
+R_PTN;Ramal Puente Nacional;D5
+R_PTOSAL;Ramal Puerto Salgar;D1
+R_PUR;Ramal Purificación;D2
+R_QUE;Ramal Quetame;D4
+R_QUI;Ramal Quimbaya ;D7
+R_RAQ;Ramal Ráquira;D5
+R_RES;Ramal Restrepo;D4
+R_RHON;Ramal Rincón Hondo;D6
+R_ROL;Ramal Roldanillo;D8
+R_SAA;Ramal Saldaña A  PK 454+870;D2
+R_SAB;Ramal Saldaña B  PK 458+345;D2
+R_SABG;Ramal Sabanagrande;D6
+R_SAL;Ramal Salento ;D7
+R_SAND;Ramal San Diego;D6
+R_SANP;Ramal San Pedro;D8
+R_SCH;Ramal Sáchica;D5
+R_SCR;Ramal Sucre;D5
+R_SDN;Ramal Sidenal - Gas Natural;D5
+R_SEV;Ramal Sevilla;D8
+R_SIE;Ramal La Sierra  PK 344+310;D2
+R_SJP;Ramal San José de Pare;D5
+R_SJU;Ramal San Juan;D6
+R_SMC;Ramal Samacá;D5
+R_SMJ;Ramal Simijaca;D3
+R_SMR;"Ramal San Martin  PK 463+440
+";D1
+R_SMT;Ramal EDS Santana Metrogas;D5
+R_SNA;Ramal San Alberto ;D1
+R_SNG;Ramal Senergy  PK 114+080;D3
+R_SNL;Ramal San Luis;D2
+R_SOG;Ramal Sogamoso  PK 80+980;D5
+R_SOR;Ramal Sora;D5
+R_SOT;Ramal Sotaquira;D5
+R_SRF;Ramal San Rafael  PK 506+850;D1
+R_SRO;Ramal San Roque;D6
+R_SROC;Ramal Santa Rosa de Cabal;D7
+R_SRV;Ramal Santa Rosa de Viterbo 16+100;D5
+R_SSO;Ramal Santa Sofía;D5
+R_SUA;Ramal Suaita;D5
+R_SUS;Ramal Susa;D3
+R_SUT;Ramal Sutamarchán;D5
+R_SUTT;Ramal Sutatausa  (73+420);D3
+R_TAM;Ramal Tamalameque;D6
+R_TAU;Ramal Tauramena;D4
+R_TAUS;Ramal Tausa;D3
+R_TEB;Ramal Tebaida;D7
+R_TEC;Ramal Termoemcali  PK 340+500;D8
+R_TEV;Ramal Termovalle  PK 336+404;D8
+R_TGA;Ramal EDS Total Gas;D8
+R_TIB;Ramal Tibasosa;D5
+R_TIE;Ramal Tierradentro;D2
+R_TIJ;Ramal Tinjacá;D5
+R_TMCN;Ramal Termocentro  PK 112+747;D1
+R_TNG;Ramal Tunungua;D3
+R_TOG;Ramal Togui;D5
+R_TRD;Ramal Termodorada  PK 260+504;D2
+R_TUJ;Ramal Tunja;D5
+R_TUL;Ramal Tuluá;D8
+R_TUT;Ramal Tuta  PK 36+700;D5
+R_UBA;Ramal Ubaté;D3
+R_UNE;Ramal Une;D4
+R_UNI;Ramal La Unión  (9+217) ;D8
+R_URU;Ramal Urumita;D6
+R_VD;Ramal Valle de Tenza  PK 82+767;D5
+R_VEL;Ramal Vélez;D5
+R_VEN;Ramal Venadillo  PK 354+670;D2
+R_VIC;Ramal La Victoria  (3+032);D8
+R_VILL;Ramal Villavicencio;D4
+R_VILM;Ramal Villamaría;D7
+R_VILN;Ramal Villanueva;D6
+R_VIR;Ramal La Virginia ;D7
+R_VLE;Ramal Villa de Leyva;D5
+R_VLG;Ramal Villavicencio GNI;D4
+R_VLL;Ramal Villanueva  PK54+000;D4
+R_VLLE;Ramal Valledupar;D6
+R_VQM;Ventaquemada;D5
+R_ZAR;Ramal Zarzal;D8
+T_CUMI;Troncal Cusiana - Miraflores;D4
+T_CUEP;Troncal Cusiana - Miraflores;D5
+T_APTE;Troncal Apiay - Termocoa;D4
+T_APVI;Troncal Apiay - Villavicencio;D4
+T_BLHN;Troncal Ballenas - Hato Nuevo;D6
+T_BOL;Troncal Bolívar;D5
+T_BRSB;Troncal Barrancabermeja - Sebastopol;D1
+T_CRCU;Troncal Casacará - Curumaní;D6
+T_CUNR;Troncal Curumaní - Norean;D6
+T_CUUP;Troncal Cusiana - PK65;D4
+T_DIT;Troncal Dina - Tello;D2
+T_GA;Troncal Gasoducto del Ariari;D4
+T_GLGA;Troncal Gualanday - Guasimal;D2
+T_GUD;Troncal Guasimal - Dina;D2
+T_HNJP;Troncal Hato Nuevo - Jagua del Pilar;D6
+T_JPCR;Troncal Jagua del Pilar - Casacará;D6
+T_LBBQ;Troncal PK 17+500 - Sucreo Oriental;D3
+T_LBBR;Troncal La Belleza - Pk 7+200;D3
+T_LEMA;Troncal Letras - Marsella;D7
+T_MALE;Troncal Mariquita - Letras;D7
+T_MAOB;Troncal Marsella - Obando;D7
+T_MISU;Troncal Miraflores - Sutamarchan;D5
+T_MQGL;Troncal Mariquita - Gualanday;D2
+T_NRSA;Troncal Norean - San Alberto;D1
+T_OBTU;Troncal Obando - Tuluá;D8
+T_OTSA;Troncal Otero - Santana;D5
+T_PSMQ;Troncal Puerto Salgar - Mariquita;D2
+T_PTSO;Troncal Puente Guillermo - Sucre Oriental;D3
+T_RMB;Troncal La Belleza - Vasconia;D1
+T_RMB;Troncal La Belleza - Vasconia;D3
+T_SBVS;Troncal Sebastopol - Vasconia;D1
+T_SLBR;Troncal San Alberto - B/meja;D1
+T_SOCO;Troncal Sucre Oriental - Cogua;D3
+T_SULB;Troncal Sutamarchan - La Belleza;D5
+T_TEBE;Troncal Teatinos - Belencito;D5
+T_TPIN;Troncal Tello - Los Pinos;D2
+T_TUCA;Troncal Tulúa - Cali;D8
+T_UPAP;Troncal PK65 - Apiay;D4
+T_VIUS;Troncal Villavicencio - Usme;D4
+T_VSPS;Troncal Vasconia - Puerto Salgar;D1
