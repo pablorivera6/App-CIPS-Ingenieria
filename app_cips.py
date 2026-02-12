@@ -2,219 +2,240 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import io
+import os
 import altair as alt
+import geopandas as gpd
+from shapely.geometry import LineString, MultiLineString
+from shapely.ops import linemerge
+from pyproj import Transformer
+from sklearn.linear_model import LinearRegression
+import zipfile
 
-# --- 1. CONFIGURACIÓN DE PÁGINA (OBLIGATORIO AL INICIO) ---
-st.set_page_config(page_title="Portal Ingeniería CIPS", page_icon="🔒", layout="wide")
+# --- 1. CONFIGURACIÓN ---
+st.set_page_config(page_title="Portal Ingeniería CIPS", page_icon="⚡", layout="wide")
 
-# --- 2. SISTEMA DE SEGURIDAD (LOGIN) ---
+# --- 2. SEGURIDAD ---
 def check_password():
-    """Retorna True si el usuario ingresó la clave correcta."""
     def password_entered():
-        if st.session_state["password"] == "CIPS2026": # <--- CLAVE DE ACCESO
+        if st.session_state["password"] == "CIPS2026": 
             st.session_state["password_correct"] = True
-            del st.session_state["password"]  # Borra la clave por seguridad
+            del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
 
     if "password_correct" not in st.session_state:
-        # Estética del Login
-        st.markdown(
-            """
-            <style>
-            .stTextInput > div > div > input {text-align: center;} 
-            </style>
-            """, unsafe_allow_html=True)
+        st.markdown("<style>.stTextInput > div > div > input {text-align: center;}</style>", unsafe_allow_html=True)
         col1, col2, col3 = st.columns([1,2,1])
         with col2:
-            st.warning("🔒 Acceso Restringido a Personal Autorizado")
+            st.warning("🔒 Acceso Restringido")
             st.text_input("Ingrese Contraseña:", type="password", on_change=password_entered, key="password")
         return False
     elif not st.session_state["password_correct"]:
         st.error("❌ Contraseña incorrecta")
         st.text_input("Ingrese Contraseña:", type="password", on_change=password_entered, key="password")
         return False
-    else:
-        return True
+    return True
 
 if not check_password():
     st.stop()
 
-# =========================================================
-#  AQUÍ COMIENZA LA APP (SOLO VISIBLE TRAS EL LOGIN)
-# =========================================================
-
-# --- 3. ENCABEZADO CON LOGO ---
+# --- 3. ENCABEZADO ---
 col_logo, col_titulo = st.columns([1, 6])
-
 with col_logo:
     try:
         st.image("logo.png", use_container_width=True) 
     except:
         st.markdown("## ⚡")
-
 with col_titulo:
-    st.title("Procesador de Integridad CIPS")
-    st.markdown("Plataforma de Ingeniería | **Análisis y Reportes**")
-
+    st.title("Procesador CIPS + LRS")
+    st.markdown("**Sistema de Integridad y Ajuste Espacial**")
 st.markdown("---")
 
-# --- 4. BARRA LATERAL ---
+# --- 4. MOTOR LRS (GEOMÁTICA) ---
+def procesar_geospacial(df, df_dcp, ruta_lectura_ducto, umbral_outlier):
+    status_log = []
+    
+    try:
+        # A. PREPARAR DATOS
+        df = df.rename(columns={
+            "Dist From Start": "PK_equipo", "On Voltage": "On_V", "Off Voltage": "Off_V",
+            "Latitude": "Lat", "Longitude": "Long", "Comment": "Comentario",
+            "DCP/Feature/DCVG Anomaly": "Anomalia"
+        })
+        
+        # B. INTERPOLAR GPS FALTANTE
+        for coord in ["Lat", "Long"]:
+            if df[coord].isna().any():
+                validos = df.dropna(subset=[coord, "PK_equipo"])
+                if not validos.empty:
+                    modelo = LinearRegression()
+                    modelo.fit(validos[["PK_equipo"]], validos[coord])
+                    mask = df[coord].isna()
+                    df.loc[mask, coord] = modelo.predict(df.loc[mask, ["PK_equipo"]])
+                    status_log.append(f"ℹ️ Interpoladas {mask.sum()} coordenadas en {coord}.")
+
+        # C. PROYECTAR A METROS
+        t = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
+        df["X"], df["Y"] = t.transform(df["Long"].values, df["Lat"].values)
+        gdf = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.X, df.Y), crs=3857)
+
+        # D. CARGAR DUCTO (INTELIGENTE: ZIP o ARCHIVO)
+        try:
+            ducto = gpd.read_file(ruta_lectura_ducto)
+        except Exception as e:
+            return None, [f"❌ Error leyendo ducto: {str(e)}"]
+
+        if ducto.crs is None: ducto = ducto.set_crs(epsg=4326)
+        ducto = ducto.to_crs(3857)
+
+        # E. UNIR TRAMOS
+        lineas = []
+        for geom in ducto.geometry:
+            if isinstance(geom, LineString): lineas.append(geom)
+            elif isinstance(geom, MultiLineString): lineas.extend(geom.geoms)
+        
+        merged = linemerge(lineas)
+        if isinstance(merged, MultiLineString):
+            merged = max(merged.geoms, key=lambda x: x.length)
+            status_log.append("⚠️ Ducto discontinuo. Se usó el tramo más largo.")
+        
+        linea_ref = merged
+        status_log.append(f"✅ Ducto cargado ({round(linea_ref.length/1000, 2)} km).")
+
+        # F. SNAP & LRS
+        gdf["geom_snap"] = gdf.geometry.apply(lambda p: linea_ref.interpolate(linea_ref.project(p)))
+        gdf["Dist_Eje_m"] = gdf.geometry.distance(gdf["geom_snap"])
+        gdf["geometry"] = gdf["geom_snap"]
+        gdf["PK_geom_m"] = gdf.geometry.apply(lambda p: linea_ref.project(p))
+
+        # G. SENTIDO AUTO
+        df_val = gdf[["PK_equipo", "PK_geom_m"]].dropna()
+        if not df_val.empty:
+            corr = df_val["PK_equipo"].corr(df_val["PK_geom_m"])
+            if corr < 0:
+                gdf["PK_geom_m"] = linea_ref.length - gdf["PK_geom_m"]
+                status_log.append("🔄 Sentido Contraflujo corregido.")
+
+        gdf["Station No"] = np.round(gdf["PK_geom_m"], 2)
+
+        # H. COORDENADAS FINALES
+        t_back = Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True)
+        gdf["Longitude"], gdf["Latitude"] = t_back.transform(gdf.geometry.x.values, gdf.geometry.y.values)
+
+        # I. DATOS FINALES
+        gdf["On_mV"] = gdf["On_V"] * 1000
+        gdf["Off_mV"] = gdf["Off_V"] * 1000
+        
+        # Limpieza
+        for col in ["On_mV", "Off_mV"]:
+            med = gdf[col].rolling(15, center=True, min_periods=1).median()
+            delta = np.abs(gdf[col] - med)
+            gdf.loc[delta > umbral_outlier, col] = med[delta > umbral_outlier]
+
+        cols = ["Station No", "Latitude", "Longitude", "On_mV", "Off_mV", "Dist_Eje_m", "Comentario", "Anomalia"]
+        for c in cols: 
+            if c not in gdf.columns: gdf[c] = ""
+            
+        return gdf[cols], status_log
+
+    except Exception as e:
+        return None, [f"❌ Error Crítico: {str(e)}"]
+
+# --- 5. BARRA LATERAL ---
 with st.sidebar:
     st.header("⚙️ Configuración")
     
-    st.subheader("1. Definición del Tramo")
-    pk_inicial = st.number_input("PK Inicial (m)", value=14000.0, step=100.0, format="%.2f")
-    pk_final = st.number_input("PK Final (m)", value=15000.0, step=100.0, format="%.2f")
+    modo = st.radio("Modo:", ["Básico (Manual)", "Avanzado (Con Ducto LRS)"])
+
+    ruta_final_ducto = None
     
+    if modo == "Avanzado (Con Ducto LRS)":
+        st.info("Ajusta coordenadas al ducto real.")
+        
+        # BUSQUEDA AUTOMÁTICA EN ZIP
+        carpeta = "ductos"
+        archivo_zip = os.path.join(carpeta, "ductos.zip")
+        
+        lista_ductos = []
+        es_zip = False
+        
+        if os.path.exists(archivo_zip):
+            try:
+                with zipfile.ZipFile(archivo_zip, 'r') as z:
+                    # Filtramos solo archivos .gpkg válidos
+                    lista_ductos = [f for f in z.namelist() if f.endswith('.gpkg') and not f.startswith('__MACOSX')]
+                es_zip = True
+            except:
+                st.error("Error leyendo ductos.zip")
+        
+        if lista_ductos:
+            seleccion = st.selectbox("Seleccione Ducto:", sorted(lista_ductos))
+            
+            if es_zip:
+                # TRUCO: Ruta virtual para leer dentro del ZIP
+                ruta_absoluta_zip = os.path.abspath(archivo_zip)
+                ruta_final_ducto = f"zip://{ruta_absoluta_zip}!{seleccion}"
+        else:
+            st.warning("⚠️ No se encontró 'ductos.zip' en la carpeta 'ductos'.")
+
+    else:
+        st.subheader("Tramo Manual")
+        pk_a = st.number_input("PK 1", value=14000.0)
+        pk_b = st.number_input("PK 2", value=15000.0)
+        sentido = st.radio("Sentido", ["Ascendente", "Contraflujo"])
+
     st.divider()
-    
-    st.subheader("2. Calibración de Limpieza")
-    st.info("Ajuste los filtros para eliminar ruido eléctrico.")
-    
-    # VALORES POR DEFECTO: LIMPIEZA FUERTE
-    umbral_pico = st.slider(
-        "Sensibilidad (mV)", 
-        min_value=5, max_value=100, value=15, 
-        help="Cualquier salto mayor a este valor será eliminado."
-    )
-    
-    ventana_deteccion = st.slider(
-        "Ancho del Pico (Vecinos)", 
-        min_value=3, max_value=11, value=9, step=2,
-        help="Usar 9 o 11 elimina los picos grandes y anchos."
-    )
-    
-    st.subheader("3. Estética del Reporte")
-    activar_suavizado = st.checkbox("Aplicar Suavizado Final", value=True)
-    ventana_suavizado = st.slider(
-        "Nivel de Suavizado", 
-        min_value=2, max_value=20, value=12, 
-        help="Valor alto (12-15) genera curvas limpias y profesionales."
-    )
+    umbral = st.slider("Umbral Limpieza (mV)", 10, 300, 100)
 
-# --- 5. LÓGICA MATEMÁTICA ---
-def procesar_archivo(uploaded_file, pk_ini, pk_fin, umbral, ventana_det, aplicar_smooth, ventana_smooth):
-    try:
-        df = pd.read_excel(uploaded_file, sheet_name=0)
-        if 'Data No' in df.columns:
-            df = df.dropna(subset=['Data No'])
+# --- 6. INTERFAZ ---
+archivo = st.file_uploader("📂 Cargar Excel", type=['xlsx'])
+
+if archivo and st.button("🚀 PROCESAR"):
+    with st.spinner("Procesando..."):
         try:
-            df_dcp = pd.read_excel(uploaded_file, sheet_name='DCP Data')
+            df_raw = pd.read_excel(archivo, sheet_name=0)
+            df_dcp = pd.read_excel(archivo, sheet_name='DCP Data') if 'DCP Data' in pd.ExcelFile(archivo).sheet_names else pd.DataFrame()
         except:
-            df_dcp = pd.DataFrame()
-    except Exception as e:
-        st.error(f"Error de lectura: {e}")
-        return None, None
+            st.error("Error en Excel."); st.stop()
 
-    # Voltajes
-    for col in ['On Voltage', 'Off Voltage']:
-        if col in df.columns:
-            df[col] = (df[col] * 1000).round(2)
-
-    # Abscisas
-    if 'Station No' in df.columns and len(df) > 0:
-        df['Station No'] = np.round(np.linspace(pk_ini, pk_fin, len(df)), 3)
-
-    # Coordenadas
-    cols_coords = ['Latitude', 'Longitude']
-    if all(col in df.columns for col in cols_coords):
-        np.random.seed(42)
-        aleatorio = np.random.uniform(0, 1, len(df))
-        FACTOR = 1000000
-        for col in cols_coords:
-            df[col] = (df[col] + (aleatorio / FACTOR)).round(8)
-
-    # Comentarios
-    col_llave = 'Data No'
-    col_destino = 'Comment'
-    if not df_dcp.empty and col_llave in df.columns and len(df_dcp.columns) > 6:
-        try:
-            col_com = df_dcp.columns[6]
-            df_dcp_unica = df_dcp.drop_duplicates(subset=[col_llave], keep='first')
-            df = pd.merge(df, df_dcp_unica[[col_llave, col_com]], on=col_llave, how='left')
-            df[col_destino] = df[col_com].fillna('')
-            if col_com != col_destino:
-                df.drop(columns=[col_com], inplace=True)
-        except:
-            pass
-
-    # Ortografía
-    correcciones = {"valvula": "Válvula", "anodo": "Ánodo", "potencial": "Potencial", "estacion": "Estación"}
-    if col_destino in df.columns:
-        for err, corr in correcciones.items():
-            df[col_destino] = df[col_destino].astype(str).str.replace(err, corr, regex=False)
-
-    # Limpieza
-    log_cambios = {}
-    for col in ['On Voltage', 'Off Voltage']:
-        if col in df.columns:
-            mediana_local = df[col].rolling(window=ventana_det, center=True, min_periods=1).median()
-            diferencia = np.abs(df[col] - mediana_local)
-            es_pico = diferencia > umbral
-            df.loc[es_pico, col] = mediana_local[es_pico]
-            picos_borrados = es_pico.sum()
+        if modo == "Avanzado (Con Ducto LRS)":
+            if ruta_final_ducto:
+                df_final, logs = procesar_geospacial(df_raw, df_dcp, ruta_final_ducto, umbral)
+                with st.expander("Detalles", expanded=True):
+                    for m in logs: st.write(m)
+                if df_final is None: st.stop()
+            else:
+                st.error("Falta seleccionar ducto."); st.stop()
+        else:
+            # Modo Básico
+            df_final = df_raw.copy()
+            df_final = df_final.rename(columns={"On Voltage": "On_V", "Off Voltage": "Off_V"})
+            df_final["On_mV"] = df_final["On_V"] * 1000
+            df_final["Off_mV"] = df_final["Off_V"] * 1000
             
-            if aplicar_smooth:
-                df[col] = df[col].rolling(window=ventana_smooth, center=True, min_periods=1).mean().round(2)
+            pks = np.linspace(min(pk_a, pk_b), max(pk_a, pk_b), len(df_final))
+            if sentido == "Contraflujo": pks = pks[::-1]
+            df_final["Station No"] = np.round(pks, 2)
             
-            log_cambios[col] = picos_borrados
+            for c in ["On_mV", "Off_mV"]:
+                m = df_final[c].rolling(15, center=True).median()
+                df_final.loc[np.abs(df_final[c]-m)>umbral, c] = m[np.abs(df_final[c]-m)>umbral]
 
-    return df, log_cambios
+        # Gráfica
+        st.subheader("📊 Perfil de Potenciales")
+        data = df_final[['Station No', 'On_mV', 'Off_mV']].melt('Station No', var_name='Tipo', value_name='mV')
+        chart = alt.Chart(data).mark_line().encode(
+            x=alt.X('Station No', title='Distancia (m)'),
+            y=alt.Y('mV', scale=alt.Scale(zero=False)),
+            color=alt.Color('Tipo', scale=alt.Scale(range=['#004E98', '#B8233E'])),
+            tooltip=['Station No', 'mV']
+        ).interactive()
+        st.altair_chart(chart, use_container_width=True)
 
-# --- 6. INTERFAZ VISUAL ---
-archivo = st.file_uploader("📂 Cargar Archivo Excel (Survey Data)", type=['xlsx'])
-
-if archivo is not None:
-    if st.button("🚀 PROCESAR Y VERIFICAR", use_container_width=True):
-        with st.spinner('Aplicando ingeniería de datos...'):
-            df_final, log = procesar_archivo(
-                archivo, pk_inicial, pk_final, umbral_pico, 
-                ventana_deteccion, activar_suavizado, ventana_suavizado
-            )
-            
-            if df_final is not None:
-                st.success("✅ Procesamiento Completado Exitosamente")
-                
-                # --- GRÁFICA CORPORATIVA ---
-                st.subheader("📊 Perfil de Potenciales (Vista Previa)")
-                
-                if 'Station No' in df_final.columns:
-                    datos_grafica = df_final[['Station No', 'On Voltage', 'Off Voltage']].melt(
-                        id_vars='Station No', var_name='Tipo', value_name='mV'
-                    )
-                    
-                    # COLORES CORPORATIVOS EN LA GRÁFICA
-                    # ON = Azul Oscuro (Estándar) | OFF = ROJO EMPRESA (#B8233E)
-                    scale_colors = alt.Scale(domain=['On Voltage', 'Off Voltage'], range=['#004E98', '#B8233E'])
-                    
-                    base = alt.Chart(datos_grafica).encode(
-                        x=alt.X('Station No', title='Distancia (m)'),
-                        y=alt.Y('mV', title='Potencial (mV)', scale=alt.Scale(zero=False)),
-                        color=alt.Color('Tipo', scale=scale_colors)
-                    )
-
-                    linea = base.mark_line(strokeWidth=2)
-                    puntos = base.mark_circle(size=60, opacity=0).encode(tooltip=['Station No', 'mV', 'Tipo'])
-                    
-                    chart = (linea + puntos).properties(height=500).interactive()
-                    st.altair_chart(chart, use_container_width=True)
-                    st.caption("💡 Zoom habilitado con rueda del mouse.")
-                
-                # Métricas
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Datos Suavizados (ON)", log.get('On Voltage', 0))
-                c2.metric("Datos Suavizados (OFF)", log.get('Off Voltage', 0))
-                
-                # Descarga
-                buffer = io.BytesIO()
-                df_final.to_excel(buffer, index=False)
-                
-                st.download_button(
-                    label="📥 DESCARGAR REPORTE OFICIAL",
-                    data=buffer,
-                    file_name="Reporte_CIPS_Procesado.xlsx",
-                    mime="application/vnd.ms-excel",
-                    use_container_width=True,
-                    type="primary" # Hace el botón rojo corporativo
-                )
+        # Descarga
+        out = io.BytesIO()
+        with pd.ExcelWriter(out, engine="openpyxl") as w:
+            df_final.to_excel(w, sheet_name="Survey Data", index=False)
+            if not df_dcp.empty:
+                df_dcp.to_excel(w, sheet_name="DCP Data", index=False)
+        st.download_button("📥 DESCARGAR", out, "CIPS_Procesado.xlsx", "application/vnd.ms-excel", type="primary")
