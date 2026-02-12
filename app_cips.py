@@ -155,46 +155,58 @@ with st.sidebar:
         archivo_zip = os.path.join(carpeta, "ductos.zip")
         archivo_nombres = os.path.join(carpeta, "nombres.csv")
         
-        # 1. LEER CSV DE NOMBRES (ROBUST DE PANDAS)
+        # 1. LEER CSV DE NOMBRES (ESTRATEGIA DOBLE: ; o ,)
         df_maestro = pd.DataFrame()
+        
         if os.path.exists(archivo_nombres):
             try:
-                # Usamos quoting=3 (QUOTE_NONE) para ignorar las comillas de Excel que rompen todo
-                # Usamos on_bad_lines='skip' para saltar filas dañadas
+                # INTENTO A: Separador PUNTO Y COMA (;) -> Típico Excel Español
                 df_maestro = pd.read_csv(
                     archivo_nombres, 
-                    sep=',', 
+                    sep=';', 
                     quoting=3, 
                     on_bad_lines='skip', 
-                    encoding='utf-8' # Tu archivo parece ser UTF-8
+                    encoding='utf-8'
                 )
                 
-                # Intentamos identificar tus columnas: ID TRAMO, TRAMO, DISTRITO
-                # Normalizamos nombres de columnas (quitamos espacios y comillas)
+                # Si falló (solo detectó 1 columna), probamos INTENTO B: COMA (,)
+                if len(df_maestro.columns) < 2:
+                    df_maestro = pd.read_csv(
+                        archivo_nombres, 
+                        sep=',', 
+                        quoting=3, 
+                        on_bad_lines='skip', 
+                        encoding='utf-8'
+                    )
+
+                # --- LIMPIEZA DE COLUMNAS ---
+                # Quitamos espacios y comillas de los nombres de las columnas
                 df_maestro.columns = df_maestro.columns.str.strip().str.replace('"', '')
-                
-                # Mapeo manual si las columnas se llaman como en tu archivo
+
+                # BUSCAR COLUMNAS POR NOMBRE O POSICIÓN
+                # Si están los nombres exactos que me diste:
                 if "ID TRAMO" in df_maestro.columns and "TRAMO" in df_maestro.columns and "DISTRITO" in df_maestro.columns:
                      df_maestro = df_maestro.rename(columns={
                          "ID TRAMO": "Archivo",
                          "TRAMO": "Nombre",
                          "DISTRITO": "Distrito"
                      })
-                
-                # Si falló el renombre, intentamos por posición (Columnas 0, 1, 2)
+                # Si no, usamos las 3 primeras columnas (0, 1, 2)
                 elif len(df_maestro.columns) >= 3:
                     df_maestro = df_maestro.iloc[:, [0, 1, 2]]
                     df_maestro.columns = ["Archivo", "Nombre", "Distrito"]
 
-                # Limpieza Profunda de Texto (Quitar comillas residuales)
-                for col in ["Archivo", "Nombre", "Distrito"]:
-                     df_maestro[col] = df_maestro[col].astype(str).str.replace('"', '').str.strip()
-
-                # Asegurar extensión .gpkg
-                df_maestro["Archivo"] = df_maestro["Archivo"].apply(lambda x: x if str(x).lower().endswith(".gpkg") else f"{x}.gpkg")
+                # --- LIMPIEZA DE DATOS ---
+                if not df_maestro.empty:
+                    for col in ["Archivo", "Nombre", "Distrito"]:
+                        # Convertir a texto, quitar comillas y espacios
+                        df_maestro[col] = df_maestro[col].astype(str).str.replace('"', '').str.strip()
+                    
+                    # Asegurar extensión .gpkg
+                    df_maestro["Archivo"] = df_maestro["Archivo"].apply(lambda x: x if str(x).lower().endswith(".gpkg") else f"{x}.gpkg")
 
             except Exception as e:
-                st.error(f"Error procesando CSV: {e}")
+                st.error(f"Error leyendo nombres.csv: {e}")
 
         # 2. MENU EN CASCADA
         if not df_maestro.empty and os.path.exists(archivo_zip):
@@ -212,16 +224,16 @@ with st.sidebar:
                     
                     ruta_absoluta_zip = os.path.abspath(archivo_zip)
                     ruta_final_ducto = f"zip://{ruta_absoluta_zip}!{archivo_real}"
-                    st.success(f"✅ Seleccionado: {nombre_sel}")
+                    st.caption(f"📍 Archivo: `{archivo_real}`")
                 else:
                     st.warning("Sin datos para este distrito.")
             else:
-                st.warning("El archivo CSV no tiene distritos válidos.")
+                st.warning("⚠️ No se encontraron distritos válidos en el CSV.")
             
         else:
-            # FALLBACK
+            # FALLBACK (PLAN B)
             if os.path.exists(archivo_zip):
-                st.warning("⚠️ Modo Archivos (CSV no leído correctamente).")
+                st.warning("⚠️ CSV no leído. Mostrando lista directa del ZIP.")
                 try:
                     with zipfile.ZipFile(archivo_zip, 'r') as z:
                         lista = [f for f in z.namelist() if f.endswith('.gpkg') and not f.startswith('__MACOSX')]
@@ -230,7 +242,7 @@ with st.sidebar:
                     ruta_final_ducto = f"zip://{ruta_absoluta_zip}!{sel}"
                 except: pass
             else:
-                 st.error("Faltan archivos en 'ductos'.")
+                 st.error("Faltan archivos en la carpeta 'ductos'.")
 
     else:
         st.subheader("Tramo Manual")
@@ -242,7 +254,7 @@ with st.sidebar:
     umbral = st.slider("Umbral Limpieza (mV)", 10, 300, 100)
 
 # --- 6. INTERFAZ ---
-archivo = st.file_uploader("📂 Cargar Excel", type=['xlsx'])
+archivo = st.file_uploader("📂 Cargar Excel (Survey Data)", type=['xlsx'])
 
 if archivo and st.button("🚀 PROCESAR"):
     with st.spinner("Procesando..."):
@@ -250,16 +262,16 @@ if archivo and st.button("🚀 PROCESAR"):
             df_raw = pd.read_excel(archivo, sheet_name=0)
             df_dcp = pd.read_excel(archivo, sheet_name='DCP Data') if 'DCP Data' in pd.ExcelFile(archivo).sheet_names else pd.DataFrame()
         except:
-            st.error("Error en Excel."); st.stop()
+            st.error("Error al leer el archivo Excel cargado. Verifique que no esté dañado."); st.stop()
 
         if modo == "Avanzado (Con Ducto LRS)":
             if ruta_final_ducto:
                 df_final, logs = procesar_geospacial(df_raw, df_dcp, ruta_final_ducto, umbral)
-                with st.expander("Detalles", expanded=True):
+                with st.expander("Detalles del Proceso", expanded=True):
                     for m in logs: st.write(m)
                 if df_final is None: st.stop()
             else:
-                st.error("Falta seleccionar ducto."); st.stop()
+                st.error("⚠️ Falta seleccionar un ducto en el menú lateral."); st.stop()
         else:
             # Modo Básico
             df_final = df_raw.copy()
@@ -292,4 +304,4 @@ if archivo and st.button("🚀 PROCESAR"):
             df_final.to_excel(w, sheet_name="Survey Data", index=False)
             if not df_dcp.empty:
                 df_dcp.to_excel(w, sheet_name="DCP Data", index=False)
-        st.download_button("📥 DESCARGAR", out, "CIPS_Procesado.xlsx", "application/vnd.ms-excel", type="primary")
+        st.download_button("📥 DESCARGAR REPORTE", out, "CIPS_Procesado.xlsx", "application/vnd.ms-excel", type="primary")
