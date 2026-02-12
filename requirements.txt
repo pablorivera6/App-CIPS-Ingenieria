@@ -8,3 +8,4 @@ shapely
 pyproj
 scikit-learn
 fiona
+rtree
