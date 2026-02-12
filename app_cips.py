@@ -10,6 +10,7 @@ from shapely.ops import linemerge
 from pyproj import Transformer
 from sklearn.linear_model import LinearRegression
 import zipfile
+import shutil
 
 # --- 1. CONFIGURACIÓN ---
 st.set_page_config(page_title="Portal Ingeniería CIPS", page_icon="⚡", layout="wide")
@@ -81,7 +82,7 @@ def procesar_geospacial(df, df_dcp, ruta_lectura_ducto, umbral_outlier):
 
         # D. CARGAR DUCTO
         try:
-            # GEOPANDAS LEE DIRECTO DEL ZIP CON LA RUTA CORRECTA
+            # GEOPANDAS LEE ARCHIVO YA EXTRAÍDO (LOCAL)
             ducto = gpd.read_file(ruta_lectura_ducto)
         except Exception as e:
             return None, [f"❌ Error leyendo mapa: {str(e)}"]
@@ -156,7 +157,7 @@ with st.sidebar:
         archivo_zip = os.path.join(carpeta, "ductos.zip")
         archivo_nombres = os.path.join(carpeta, "nombres.csv")
         
-        # 1. LEER CSV DE NOMBRES (SIN NOMBRES DE COLUMNA, POR POSICIÓN)
+        # 1. LEER CSV DE NOMBRES (SIN NOMBRES DE COLUMNA)
         df_maestro = pd.DataFrame()
         
         if os.path.exists(archivo_nombres):
@@ -166,14 +167,14 @@ with st.sidebar:
                 if df_temp.shape[1] < 2:
                     df_temp = pd.read_csv(archivo_nombres, sep=',', header=None, dtype=str, on_bad_lines='skip', encoding='latin-1')
 
-                # Si tiene >= 3 columnas, asumimos orden: ARCHIVO | NOMBRE | DISTRITO
+                # Asignación de columnas por POSICIÓN
                 if df_temp.shape[1] >= 3:
                     # Si la primera fila parece titulo, la borramos
                     primer_val = str(df_temp.iloc[0,0]).upper()
                     if "ID" in primer_val or "TRAMO" in primer_val or "ARCHIVO" in primer_val:
                         df_temp = df_temp.iloc[1:]
 
-                    # Asignamos nombres fijos
+                    # Columna 0: Archivo, Columna 1: Nombre, Columna 2: Distrito
                     df_maestro["Archivo"] = df_temp.iloc[:, 0].astype(str).str.strip().str.replace('"', '')
                     df_maestro["Nombre"] = df_temp.iloc[:, 1].astype(str).str.strip().str.replace('"', '')
                     df_maestro["Distrito"] = df_temp.iloc[:, 2].astype(str).str.strip().str.replace('"', '')
@@ -184,7 +185,7 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"Error CSV: {e}")
 
-        # 2. MENU EN CASCADA CON BÚSQUEDA INTELIGENTE EN ZIP
+        # 2. MENU EN CASCADA CON EXTRACCIÓN REAL
         if not df_maestro.empty and os.path.exists(archivo_zip):
             lista_distritos = sorted(df_maestro["Distrito"].dropna().unique())
             
@@ -196,44 +197,57 @@ with st.sidebar:
                 
                 if opciones:
                     nombre_sel = st.selectbox("2. Infraestructura:", sorted(opciones.keys()))
-                    archivo_objetivo = opciones[nombre_sel] # El nombre que buscamos (ej: R_BAL.gpkg)
+                    archivo_objetivo = opciones[nombre_sel] 
                     
-                    # --- BÚSQUEDA INTELIGENTE DENTRO DEL ZIP ---
-                    # Buscamos el archivo real dentro del ZIP (puede estar en subcarpetas)
-                    ruta_interna_real = None
-                    try:
-                        with zipfile.ZipFile(archivo_zip, 'r') as z:
-                            for f in z.namelist():
-                                # Comparamos solo el nombre final del archivo (ignorando carpetas)
-                                if os.path.basename(f) == archivo_objetivo:
-                                    ruta_interna_real = f
-                                    break
-                    except:
-                        st.error("Error leyendo estructura del ZIP.")
+                    # --- ESTRATEGIA DE EXTRACCIÓN ---
+                    if st.button("🗺️ Cargar Mapa Seleccionado"):
+                        with st.spinner("Descomprimiendo mapa..."):
+                            try:
+                                with zipfile.ZipFile(archivo_zip, 'r') as z:
+                                    # Buscar el archivo dentro del ZIP (no importa la carpeta)
+                                    archivo_encontrado = None
+                                    for f in z.namelist():
+                                        if os.path.basename(f) == archivo_objetivo:
+                                            archivo_encontrado = f
+                                            break
+                                    
+                                    if archivo_encontrado:
+                                        # Extraerlo temporalmente a la raíz
+                                        z.extract(archivo_encontrado, ".")
+                                        ruta_final_ducto = archivo_encontrado
+                                        st.session_state['ruta_mapa_temp'] = ruta_final_ducto
+                                        st.success(f"Mapa cargado: {archivo_objetivo}")
+                                    else:
+                                        st.error(f"No se encontró '{archivo_objetivo}' dentro del ZIP.")
+                            except Exception as e:
+                                st.error(f"Error extrayendo: {e}")
 
-                    if ruta_interna_real:
-                        ruta_absoluta_zip = os.path.abspath(archivo_zip)
-                        # Usamos la ruta interna real que encontramos
-                        ruta_final_ducto = f"zip://{ruta_absoluta_zip}!{ruta_interna_real}"
-                        st.success(f"✅ Archivo encontrado: `{ruta_interna_real}`")
-                    else:
-                        st.error(f"❌ El archivo '{archivo_objetivo}' no existe dentro del ZIP 'ductos.zip'.")
-                        st.info("Verifique que el nombre en el Excel coincida con el archivo .gpkg")
+                    # Recuperar ruta si ya se extrajo
+                    if 'ruta_mapa_temp' in st.session_state:
+                         ruta_final_ducto = st.session_state['ruta_mapa_temp']
+                         st.caption(f"📍 Usando mapa: `{os.path.basename(ruta_final_ducto)}`")
+
                 else:
                     st.warning("Sin datos.")
         else:
             # FALLBACK
+            st.warning("⚠️ Usando modo directo.")
             if os.path.exists(archivo_zip):
-                st.warning("⚠️ Modo manual (CSV no detectado o falló).")
                 try:
                     with zipfile.ZipFile(archivo_zip, 'r') as z:
                         lista = [f for f in z.namelist() if f.endswith('.gpkg') and not f.startswith('__MACOSX')]
-                    sel = st.selectbox("Seleccione del ZIP:", sorted(lista))
-                    ruta_absoluta_zip = os.path.abspath(archivo_zip)
-                    ruta_final_ducto = f"zip://{ruta_absoluta_zip}!{sel}"
+                    sel = st.selectbox("Archivo:", sorted(lista))
+                    
+                    # Extracción directa
+                    if st.button("Cargar Mapa"):
+                        with zipfile.ZipFile(archivo_zip, 'r') as z:
+                            z.extract(sel, ".")
+                            st.session_state['ruta_mapa_temp'] = sel
+                            st.rerun()
+                    
+                    if 'ruta_mapa_temp' in st.session_state:
+                        ruta_final_ducto = st.session_state['ruta_mapa_temp']
                 except: pass
-            else:
-                 st.error("Faltan archivos en 'ductos'.")
 
     else:
         st.subheader("Tramo Manual")
@@ -256,13 +270,18 @@ if archivo and st.button("🚀 PROCESAR"):
             st.error("Error en Excel."); st.stop()
 
         if modo == "Avanzado (Con Ducto LRS)":
-            if ruta_final_ducto:
+            if ruta_final_ducto and os.path.exists(ruta_final_ducto):
                 df_final, logs = procesar_geospacial(df_raw, df_dcp, ruta_final_ducto, umbral)
                 with st.expander("Detalles", expanded=True):
                     for m in logs: st.write(m)
+                
+                # Limpieza (borrar mapa temporal después de usar)
+                # try: os.remove(ruta_final_ducto) 
+                # except: pass
+                
                 if df_final is None: st.stop()
             else:
-                st.error("Falta seleccionar ducto."); st.stop()
+                st.error("⚠️ Primero debe dar click en el botón 'Cargar Mapa Seleccionado' en el menú lateral."); st.stop()
         else:
             # Modo Básico
             df_final = df_raw.copy()
