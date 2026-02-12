@@ -80,12 +80,11 @@ def procesar_geospacial(df, df_dcp, ruta_lectura_ducto, umbral_outlier):
         df["X"], df["Y"] = t.transform(df["Long"].values, df["Lat"].values)
         gdf = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.X, df.Y), crs=3857)
 
-        # D. CARGAR DUCTO
+        # D. CARGAR DUCTO (MODO LOCAL)
         try:
-            # GEOPANDAS LEE ARCHIVO YA EXTRAÍDO (LOCAL)
             ducto = gpd.read_file(ruta_lectura_ducto)
         except Exception as e:
-            return None, [f"❌ Error leyendo mapa: {str(e)}"]
+            return None, [f"❌ Error leyendo mapa extraído: {str(e)}"]
 
         if ducto.crs is None: ducto = ducto.set_crs(epsg=4326)
         ducto = ducto.to_crs(3857)
@@ -157,35 +156,42 @@ with st.sidebar:
         archivo_zip = os.path.join(carpeta, "ductos.zip")
         archivo_nombres = os.path.join(carpeta, "nombres.csv")
         
-        # 1. LEER CSV DE NOMBRES (SIN NOMBRES DE COLUMNA)
+        # --- DIAGNÓSTICO (INVISIBLE SI TODO VA BIEN) ---
+        debug_log = []
+        
+        # 1. LEER CSV DE NOMBRES (ROBUST V4.0)
         df_maestro = pd.DataFrame()
         
         if os.path.exists(archivo_nombres):
             try:
-                # Intento leer ; o ,
+                # Intento A: Punto y Coma
                 df_temp = pd.read_csv(archivo_nombres, sep=';', header=None, dtype=str, on_bad_lines='skip', encoding='latin-1')
                 if df_temp.shape[1] < 2:
+                    # Intento B: Coma
                     df_temp = pd.read_csv(archivo_nombres, sep=',', header=None, dtype=str, on_bad_lines='skip', encoding='latin-1')
 
-                # Asignación de columnas por POSICIÓN
                 if df_temp.shape[1] >= 3:
-                    # Si la primera fila parece titulo, la borramos
-                    primer_val = str(df_temp.iloc[0,0]).upper()
-                    if "ID" in primer_val or "TRAMO" in primer_val or "ARCHIVO" in primer_val:
-                        df_temp = df_temp.iloc[1:]
-
-                    # Columna 0: Archivo, Columna 1: Nombre, Columna 2: Distrito
+                    # Detectar si hay titulos en la primera fila
+                    fila0 = str(df_temp.iloc[0,0]).upper()
+                    start_row = 1 if ("ID" in fila0 or "ARCHIVO" in fila0) else 0
+                    
+                    df_temp = df_temp.iloc[start_row:]
+                    
                     df_maestro["Archivo"] = df_temp.iloc[:, 0].astype(str).str.strip().str.replace('"', '')
                     df_maestro["Nombre"] = df_temp.iloc[:, 1].astype(str).str.strip().str.replace('"', '')
                     df_maestro["Distrito"] = df_temp.iloc[:, 2].astype(str).str.strip().str.replace('"', '')
                     
-                    # Aseguramos extensión .gpkg
-                    df_maestro["Archivo"] = df_maestro["Archivo"].apply(lambda x: x if str(x).lower().endswith(".gpkg") else f"{x}.gpkg")
-
+                    # Asegurar extensión y limpiar
+                    df_maestro["Archivo"] = df_maestro["Archivo"].apply(lambda x: x.split('.')[0] + ".gpkg")
+                    debug_log.append(f"✅ CSV cargado: {len(df_maestro)} registros.")
+                else:
+                    debug_log.append(f"⚠️ CSV con formato extraño: {df_temp.shape[1]} columnas.")
             except Exception as e:
-                st.error(f"Error CSV: {e}")
+                debug_log.append(f"❌ Error CSV: {e}")
+        else:
+            debug_log.append("❌ No se encuentra nombres.csv")
 
-        # 2. MENU EN CASCADA CON EXTRACCIÓN REAL
+        # 2. MENU EN CASCADA CON EXTRACCIÓN AUTOMÁTICA
         if not df_maestro.empty and os.path.exists(archivo_zip):
             lista_distritos = sorted(df_maestro["Distrito"].dropna().unique())
             
@@ -199,55 +205,43 @@ with st.sidebar:
                     nombre_sel = st.selectbox("2. Infraestructura:", sorted(opciones.keys()))
                     archivo_objetivo = opciones[nombre_sel] 
                     
-                    # --- ESTRATEGIA DE EXTRACCIÓN ---
-                    if st.button("🗺️ Cargar Mapa Seleccionado"):
-                        with st.spinner("Descomprimiendo mapa..."):
-                            try:
-                                with zipfile.ZipFile(archivo_zip, 'r') as z:
-                                    # Buscar el archivo dentro del ZIP (no importa la carpeta)
-                                    archivo_encontrado = None
-                                    for f in z.namelist():
-                                        if os.path.basename(f) == archivo_objetivo:
-                                            archivo_encontrado = f
-                                            break
-                                    
-                                    if archivo_encontrado:
-                                        # Extraerlo temporalmente a la raíz
-                                        z.extract(archivo_encontrado, ".")
-                                        ruta_final_ducto = archivo_encontrado
-                                        st.session_state['ruta_mapa_temp'] = ruta_final_ducto
-                                        st.success(f"Mapa cargado: {archivo_objetivo}")
-                                    else:
-                                        st.error(f"No se encontró '{archivo_objetivo}' dentro del ZIP.")
-                            except Exception as e:
-                                st.error(f"Error extrayendo: {e}")
-
-                    # Recuperar ruta si ya se extrajo
-                    if 'ruta_mapa_temp' in st.session_state:
-                         ruta_final_ducto = st.session_state['ruta_mapa_temp']
-                         st.caption(f"📍 Usando mapa: `{os.path.basename(ruta_final_ducto)}`")
-
+                    # --- EXTRACCIÓN AUTOMÁTICA (PLAN Z) ---
+                    # 1. Buscamos el archivo en el ZIP
+                    archivo_encontrado = None
+                    try:
+                        with zipfile.ZipFile(archivo_zip, 'r') as z:
+                            todos_los_archivos = z.namelist()
+                            for f in todos_los_archivos:
+                                # Compara el nombre final ignorando carpetas
+                                if os.path.basename(f) == archivo_objetivo:
+                                    archivo_encontrado = f
+                                    break
+                            
+                            if archivo_encontrado:
+                                # 2. Lo extraemos a un archivo temporal local
+                                nombre_temp = "temp_ducto_activo.gpkg"
+                                with open(nombre_temp, 'wb') as f_out:
+                                    f_out.write(z.read(archivo_encontrado))
+                                
+                                ruta_final_ducto = nombre_temp
+                                st.caption(f"✅ Mapa listo: `{archivo_objetivo}`")
+                            else:
+                                st.error(f"❌ No se encontró '{archivo_objetivo}' en el ZIP.")
+                                debug_log.append(f"Buscaba: {archivo_objetivo}")
+                                debug_log.append(f"Archivos en ZIP (primeros 5): {todos_los_archivos[:5]}")
+                    
+                    except Exception as e:
+                        st.error("Error al descomprimir.")
+                        debug_log.append(f"Error ZIP: {e}")
                 else:
                     st.warning("Sin datos.")
-        else:
-            # FALLBACK
-            st.warning("⚠️ Usando modo directo.")
+        
+        # Muestra el log solo si hay errores o dudas
+        with st.expander("🛠️ Diagnóstico (Abrir si falla)"):
+            for l in debug_log: st.write(l)
             if os.path.exists(archivo_zip):
-                try:
-                    with zipfile.ZipFile(archivo_zip, 'r') as z:
-                        lista = [f for f in z.namelist() if f.endswith('.gpkg') and not f.startswith('__MACOSX')]
-                    sel = st.selectbox("Archivo:", sorted(lista))
-                    
-                    # Extracción directa
-                    if st.button("Cargar Mapa"):
-                        with zipfile.ZipFile(archivo_zip, 'r') as z:
-                            z.extract(sel, ".")
-                            st.session_state['ruta_mapa_temp'] = sel
-                            st.rerun()
-                    
-                    if 'ruta_mapa_temp' in st.session_state:
-                        ruta_final_ducto = st.session_state['ruta_mapa_temp']
-                except: pass
+                 with zipfile.ZipFile(archivo_zip, 'r') as z:
+                     st.write("Contenido ZIP:", z.namelist()[:10])
 
     else:
         st.subheader("Tramo Manual")
@@ -274,14 +268,9 @@ if archivo and st.button("🚀 PROCESAR"):
                 df_final, logs = procesar_geospacial(df_raw, df_dcp, ruta_final_ducto, umbral)
                 with st.expander("Detalles", expanded=True):
                     for m in logs: st.write(m)
-                
-                # Limpieza (borrar mapa temporal después de usar)
-                # try: os.remove(ruta_final_ducto) 
-                # except: pass
-                
                 if df_final is None: st.stop()
             else:
-                st.error("⚠️ Primero debe dar click en el botón 'Cargar Mapa Seleccionado' en el menú lateral."); st.stop()
+                st.error("⚠️ El mapa no se pudo cargar. Revise el Diagnóstico."); st.stop()
         else:
             # Modo Básico
             df_final = df_raw.copy()
