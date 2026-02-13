@@ -9,8 +9,6 @@ from shapely.geometry import LineString, MultiLineString
 from shapely.ops import linemerge
 from pyproj import Transformer
 from sklearn.linear_model import LinearRegression
-import zipfile
-import shutil
 
 # --- 1. CONFIGURACIÓN ---
 st.set_page_config(page_title="Portal Ingeniería CIPS", page_icon="⚡", layout="wide")
@@ -53,9 +51,8 @@ with col_titulo:
 st.markdown("---")
 
 # --- 4. MOTOR LRS (GEOMÁTICA) ---
-def procesar_geospacial(df, df_dcp, ruta_lectura_ducto, umbral_outlier):
+def procesar_geospacial(df, df_dcp, ruta_mapa, umbral_outlier):
     status_log = []
-    
     try:
         # A. PREPARAR DATOS
         df = df.rename(columns={
@@ -80,12 +77,8 @@ def procesar_geospacial(df, df_dcp, ruta_lectura_ducto, umbral_outlier):
         df["X"], df["Y"] = t.transform(df["Long"].values, df["Lat"].values)
         gdf = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.X, df.Y), crs=3857)
 
-        # D. CARGAR DUCTO (MODO LOCAL)
-        try:
-            ducto = gpd.read_file(ruta_lectura_ducto)
-        except Exception as e:
-            return None, [f"❌ Error leyendo mapa extraído: {str(e)}"]
-
+        # D. CARGAR DUCTO
+        ducto = gpd.read_file(ruta_mapa)
         if ducto.crs is None: ducto = ducto.set_crs(epsg=4326)
         ducto = ducto.to_crs(3857)
 
@@ -98,7 +91,6 @@ def procesar_geospacial(df, df_dcp, ruta_lectura_ducto, umbral_outlier):
         merged = linemerge(lineas)
         if isinstance(merged, MultiLineString):
             merged = max(merged.geoms, key=lambda x: x.length)
-            status_log.append("⚠️ Ducto discontinuo. Se usó el tramo más largo.")
         
         linea_ref = merged
         status_log.append(f"✅ Ducto cargado ({round(linea_ref.length/1000, 2)} km).")
@@ -138,169 +130,85 @@ def procesar_geospacial(df, df_dcp, ruta_lectura_ducto, umbral_outlier):
             if c not in gdf.columns: gdf[c] = ""
             
         return gdf[cols], status_log
-
     except Exception as e:
-        return None, [f"❌ Error Crítico: {str(e)}"]
+        return None, [f"❌ Error: {str(e)}"]
 
 # --- 5. BARRA LATERAL ---
 with st.sidebar:
     st.header("⚙️ Configuración")
-    
     modo = st.radio("Modo:", ["Básico (Manual)", "Avanzado (Con Ducto LRS)"])
     ruta_final_ducto = None
     
     if modo == "Avanzado (Con Ducto LRS)":
-        st.info("Ajuste LRS Activo")
-        
         carpeta = "ductos"
-        archivo_zip = os.path.join(carpeta, "ductos.zip")
         archivo_nombres = os.path.join(carpeta, "nombres.csv")
         
-        # --- DIAGNÓSTICO (INVISIBLE SI TODO VA BIEN) ---
-        debug_log = []
-        
-        # 1. LEER CSV DE NOMBRES (ROBUST V4.0)
         df_maestro = pd.DataFrame()
-        
         if os.path.exists(archivo_nombres):
             try:
-                # Intento A: Punto y Coma
-                df_temp = pd.read_csv(archivo_nombres, sep=';', header=None, dtype=str, on_bad_lines='skip', encoding='latin-1')
-                if df_temp.shape[1] < 2:
-                    # Intento B: Coma
-                    df_temp = pd.read_csv(archivo_nombres, sep=',', header=None, dtype=str, on_bad_lines='skip', encoding='latin-1')
-
+                # Lectura flexible de nombres.csv
+                df_temp = pd.read_csv(archivo_nombres, sep=None, header=None, engine='python', encoding='latin-1')
                 if df_temp.shape[1] >= 3:
-                    # Detectar si hay titulos en la primera fila
-                    fila0 = str(df_temp.iloc[0,0]).upper()
-                    start_row = 1 if ("ID" in fila0 or "ARCHIVO" in fila0) else 0
-                    
-                    df_temp = df_temp.iloc[start_row:]
-                    
-                    df_maestro["Archivo"] = df_temp.iloc[:, 0].astype(str).str.strip().str.replace('"', '')
+                    if "ID" in str(df_temp.iloc[0,0]).upper(): df_temp = df_temp.iloc[1:]
+                    df_maestro["ID"] = df_temp.iloc[:, 0].astype(str).str.strip().str.replace('"', '')
                     df_maestro["Nombre"] = df_temp.iloc[:, 1].astype(str).str.strip().str.replace('"', '')
                     df_maestro["Distrito"] = df_temp.iloc[:, 2].astype(str).str.strip().str.replace('"', '')
-                    
-                    # Asegurar extensión y limpiar
-                    df_maestro["Archivo"] = df_maestro["Archivo"].apply(lambda x: x.split('.')[0] + ".gpkg")
-                    debug_log.append(f"✅ CSV cargado: {len(df_maestro)} registros.")
-                else:
-                    debug_log.append(f"⚠️ CSV con formato extraño: {df_temp.shape[1]} columnas.")
-            except Exception as e:
-                debug_log.append(f"❌ Error CSV: {e}")
-        else:
-            debug_log.append("❌ No se encuentra nombres.csv")
+                    st.success(f"CSV cargado: {len(df_maestro)} registros.")
+            except: st.error("Error leyendo nombres.csv")
 
-        # 2. MENU EN CASCADA CON EXTRACCIÓN AUTOMÁTICA
-        if not df_maestro.empty and os.path.exists(archivo_zip):
-            lista_distritos = sorted(df_maestro["Distrito"].dropna().unique())
+        if not df_maestro.empty:
+            distritos = sorted(df_maestro["Distrito"].unique())
+            dist_sel = st.selectbox("1. Distrito:", distritos)
             
-            if lista_distritos:
-                distrito_sel = st.selectbox("1. Distrito:", lista_distritos)
-                
-                df_filtrado = df_maestro[df_maestro["Distrito"] == distrito_sel]
-                opciones = dict(zip(df_filtrado["Nombre"], df_filtrado["Archivo"]))
-                
-                if opciones:
-                    nombre_sel = st.selectbox("2. Infraestructura:", sorted(opciones.keys()))
-                    archivo_objetivo = opciones[nombre_sel] 
-                    
-                    # --- EXTRACCIÓN AUTOMÁTICA (PLAN Z) ---
-                    # 1. Buscamos el archivo en el ZIP
-                    archivo_encontrado = None
-                    try:
-                        with zipfile.ZipFile(archivo_zip, 'r') as z:
-                            todos_los_archivos = z.namelist()
-                            for f in todos_los_archivos:
-                                # Compara el nombre final ignorando carpetas
-                                if os.path.basename(f) == archivo_objetivo:
-                                    archivo_encontrado = f
-                                    break
-                            
-                            if archivo_encontrado:
-                                # 2. Lo extraemos a un archivo temporal local
-                                nombre_temp = "temp_ducto_activo.gpkg"
-                                with open(nombre_temp, 'wb') as f_out:
-                                    f_out.write(z.read(archivo_encontrado))
-                                
-                                ruta_final_ducto = nombre_temp
-                                st.caption(f"✅ Mapa listo: `{archivo_objetivo}`")
-                            else:
-                                st.error(f"❌ No se encontró '{archivo_objetivo}' en el ZIP.")
-                                debug_log.append(f"Buscaba: {archivo_objetivo}")
-                                debug_log.append(f"Archivos en ZIP (primeros 5): {todos_los_archivos[:5]}")
-                    
-                    except Exception as e:
-                        st.error("Error al descomprimir.")
-                        debug_log.append(f"Error ZIP: {e}")
-                else:
-                    st.warning("Sin datos.")
-        
-        # Muestra el log solo si hay errores o dudas
-        with st.expander("🛠️ Diagnóstico (Abrir si falla)"):
-            for l in debug_log: st.write(l)
-            if os.path.exists(archivo_zip):
-                 with zipfile.ZipFile(archivo_zip, 'r') as z:
-                     st.write("Contenido ZIP:", z.namelist()[:10])
+            df_f = df_maestro[df_maestro["Distrito"] == dist_sel]
+            opciones = dict(zip(df_f["Nombre"], df_f["ID"]))
+            nombre_sel = st.selectbox("2. Infraestructura:", sorted(opciones.keys()))
+            
+            # Buscamos el archivo .gpkg en la carpeta ductos/
+            id_buscado = opciones[nombre_sel].strip()
+            # Probamos con y sin extensión .gpkg
+            opcion1 = os.path.join(carpeta, id_buscado)
+            opcion2 = os.path.join(carpeta, f"{id_buscado}.gpkg")
+            
+            if os.path.exists(opcion1): ruta_final_ducto = opcion1
+            elif os.path.exists(opcion2): ruta_final_ducto = opcion2
+            
+            if ruta_final_ducto:
+                st.success(f"✅ Mapa listo: {id_buscado}")
+            else:
+                st.error(f"❌ No se encuentra el archivo '{id_buscado}.gpkg' en la carpeta ductos.")
+                st.info("Asegúrese de que el ID en el Excel coincida con el nombre del archivo en GitHub.")
 
-    else:
-        st.subheader("Tramo Manual")
-        pk_a = st.number_input("PK 1", value=14000.0)
-        pk_b = st.number_input("PK 2", value=15000.0)
-        sentido = st.radio("Sentido", ["Ascendente", "Contraflujo"])
-
-    st.divider()
     umbral = st.slider("Umbral Limpieza (mV)", 10, 300, 100)
 
 # --- 6. INTERFAZ ---
 archivo = st.file_uploader("📂 Cargar Excel", type=['xlsx'])
-
 if archivo and st.button("🚀 PROCESAR"):
     with st.spinner("Procesando..."):
         try:
             df_raw = pd.read_excel(archivo, sheet_name=0)
             df_dcp = pd.read_excel(archivo, sheet_name='DCP Data') if 'DCP Data' in pd.ExcelFile(archivo).sheet_names else pd.DataFrame()
-        except:
-            st.error("Error en Excel."); st.stop()
-
-        if modo == "Avanzado (Con Ducto LRS)":
-            if ruta_final_ducto and os.path.exists(ruta_final_ducto):
-                df_final, logs = procesar_geospacial(df_raw, df_dcp, ruta_final_ducto, umbral)
-                with st.expander("Detalles", expanded=True):
-                    for m in logs: st.write(m)
-                if df_final is None: st.stop()
+            
+            if modo == "Avanzado (Con Ducto LRS)":
+                if ruta_final_ducto:
+                    df_final, logs = procesar_geospacial(df_raw, df_dcp, ruta_final_ducto, umbral)
+                    with st.expander("Detalles"):
+                        for m in logs: st.write(m)
+                    if df_final is None: st.stop()
+                else:
+                    st.error("Seleccione un ducto."); st.stop()
             else:
-                st.error("⚠️ El mapa no se pudo cargar. Revise el Diagnóstico."); st.stop()
-        else:
-            # Modo Básico
-            df_final = df_raw.copy()
-            df_final = df_final.rename(columns={"On Voltage": "On_V", "Off Voltage": "Off_V"})
-            df_final["On_mV"] = df_final["On_V"] * 1000
-            df_final["Off_mV"] = df_final["Off_V"] * 1000
-            
-            pks = np.linspace(min(pk_a, pk_b), max(pk_a, pk_b), len(df_final))
-            if sentido == "Contraflujo": pks = pks[::-1]
-            df_final["Station No"] = np.round(pks, 2)
-            
-            for c in ["On_mV", "Off_mV"]:
-                m = df_final[c].rolling(15, center=True).median()
-                df_final.loc[np.abs(df_final[c]-m)>umbral, c] = m[np.abs(df_final[c]-m)>umbral]
+                # Modo Básico
+                df_final = df_raw.copy().rename(columns={"On Voltage": "On_V", "Off Voltage": "Off_V"})
+                df_final["On_mV"], df_final["Off_mV"] = df_final["On_V"]*1000, df_final["Off_V"]*1000
+                df_final["Station No"] = np.round(np.linspace(0, 1000, len(df_final)), 2)
 
-        # Gráfica
-        st.subheader("📊 Perfil de Potenciales")
-        data = df_final[['Station No', 'On_mV', 'Off_mV']].melt('Station No', var_name='Tipo', value_name='mV')
-        chart = alt.Chart(data).mark_line().encode(
-            x=alt.X('Station No', title='Distancia (m)'),
-            y=alt.Y('mV', scale=alt.Scale(zero=False)),
-            color=alt.Color('Tipo', scale=alt.Scale(range=['#004E98', '#B8233E'])),
-            tooltip=['Station No', 'mV']
-        ).interactive()
-        st.altair_chart(chart, use_container_width=True)
-
-        # Descarga
-        out = io.BytesIO()
-        with pd.ExcelWriter(out, engine="openpyxl") as w:
-            df_final.to_excel(w, sheet_name="Survey Data", index=False)
-            if not df_dcp.empty:
-                df_dcp.to_excel(w, sheet_name="DCP Data", index=False)
-        st.download_button("📥 DESCARGAR", out, "CIPS_Procesado.xlsx", "application/vnd.ms-excel", type="primary")
+            st.subheader("📊 Perfil de Potenciales")
+            st.line_chart(df_final.set_index('Station No')[['On_mV', 'Off_mV']])
+            
+            out = io.BytesIO()
+            with pd.ExcelWriter(out, engine="openpyxl") as w:
+                df_final.to_excel(w, sheet_name="Survey Data", index=False)
+            st.download_button("📥 DESCARGAR", out, "CIPS_Procesado.xlsx")
+        except Exception as e:
+            st.error(f"Error general: {e}")
