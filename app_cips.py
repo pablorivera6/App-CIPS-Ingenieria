@@ -54,14 +54,12 @@ st.markdown("---")
 def procesar_geospacial(df, df_dcp, ruta_mapa, umbral_outlier):
     status_log = []
     try:
-        # A. PREPARAR DATOS
         df = df.rename(columns={
             "Dist From Start": "PK_equipo", "On Voltage": "On_V", "Off Voltage": "Off_V",
             "Latitude": "Lat", "Longitude": "Long", "Comment": "Comentario",
             "DCP/Feature/DCVG Anomaly": "Anomalia"
         })
         
-        # B. INTERPOLAR GPS FALTANTE
         for coord in ["Lat", "Long"]:
             if df[coord].isna().any():
                 validos = df.dropna(subset=[coord, "PK_equipo"])
@@ -72,17 +70,14 @@ def procesar_geospacial(df, df_dcp, ruta_mapa, umbral_outlier):
                     df.loc[mask, coord] = modelo.predict(df.loc[mask, ["PK_equipo"]])
                     status_log.append(f"ℹ️ Interpoladas {mask.sum()} coordenadas en {coord}.")
 
-        # C. PROYECTAR A METROS
         t = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
         df["X"], df["Y"] = t.transform(df["Long"].values, df["Lat"].values)
         gdf = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.X, df.Y), crs=3857)
 
-        # D. CARGAR DUCTO
         ducto = gpd.read_file(ruta_mapa)
         if ducto.crs is None: ducto = ducto.set_crs(epsg=4326)
         ducto = ducto.to_crs(3857)
 
-        # E. UNIR TRAMOS
         lineas = []
         for geom in ducto.geometry:
             if isinstance(geom, LineString): lineas.append(geom)
@@ -95,13 +90,11 @@ def procesar_geospacial(df, df_dcp, ruta_mapa, umbral_outlier):
         linea_ref = merged
         status_log.append(f"✅ Ducto cargado ({round(linea_ref.length/1000, 2)} km).")
 
-        # F. SNAP & LRS
         gdf["geom_snap"] = gdf.geometry.apply(lambda p: linea_ref.interpolate(linea_ref.project(p)))
         gdf["Dist_Eje_m"] = gdf.geometry.distance(gdf["geom_snap"])
         gdf["geometry"] = gdf["geom_snap"]
         gdf["PK_geom_m"] = gdf.geometry.apply(lambda p: linea_ref.project(p))
 
-        # G. SENTIDO AUTO
         df_val = gdf[["PK_equipo", "PK_geom_m"]].dropna()
         if not df_val.empty:
             corr = df_val["PK_equipo"].corr(df_val["PK_geom_m"])
@@ -111,15 +104,12 @@ def procesar_geospacial(df, df_dcp, ruta_mapa, umbral_outlier):
 
         gdf["Station No"] = np.round(gdf["PK_geom_m"], 2)
 
-        # H. COORDENADAS FINALES
         t_back = Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True)
         gdf["Longitude"], gdf["Latitude"] = t_back.transform(gdf.geometry.x.values, gdf.geometry.y.values)
 
-        # I. DATOS FINALES
         gdf["On_mV"] = gdf["On_V"] * 1000
         gdf["Off_mV"] = gdf["Off_V"] * 1000
         
-        # Limpieza
         for col in ["On_mV", "Off_mV"]:
             med = gdf[col].rolling(15, center=True, min_periods=1).median()
             delta = np.abs(gdf[col] - med)
@@ -146,8 +136,13 @@ with st.sidebar:
         df_maestro = pd.DataFrame()
         if os.path.exists(archivo_nombres):
             try:
-                # Lectura flexible de nombres.csv
-                df_temp = pd.read_csv(archivo_nombres, sep=None, header=None, engine='python', encoding='latin-1')
+                # CAMBIO CLAVE: Usamos utf-8-sig para leer correctamente los nombres en español
+                df_temp = pd.read_csv(archivo_nombres, sep=None, header=None, engine='python', encoding='utf-8-sig')
+                
+                # Fallback si el archivo está en Latin-1 (formato antiguo)
+                if "Ã" in str(df_temp.iloc[0,1]):
+                    df_temp = pd.read_csv(archivo_nombres, sep=None, header=None, engine='python', encoding='latin-1')
+
                 if df_temp.shape[1] >= 3:
                     if "ID" in str(df_temp.iloc[0,0]).upper(): df_temp = df_temp.iloc[1:]
                     df_maestro["ID"] = df_temp.iloc[:, 0].astype(str).str.strip().str.replace('"', '')
@@ -164,9 +159,7 @@ with st.sidebar:
             opciones = dict(zip(df_f["Nombre"], df_f["ID"]))
             nombre_sel = st.selectbox("2. Infraestructura:", sorted(opciones.keys()))
             
-            # Buscamos el archivo .gpkg en la carpeta ductos/
             id_buscado = opciones[nombre_sel].strip()
-            # Probamos con y sin extensión .gpkg
             opcion1 = os.path.join(carpeta, id_buscado)
             opcion2 = os.path.join(carpeta, f"{id_buscado}.gpkg")
             
@@ -177,7 +170,6 @@ with st.sidebar:
                 st.success(f"✅ Mapa listo: {id_buscado}")
             else:
                 st.error(f"❌ No se encuentra el archivo '{id_buscado}.gpkg' en la carpeta ductos.")
-                st.info("Asegúrese de que el ID en el Excel coincida con el nombre del archivo en GitHub.")
 
     umbral = st.slider("Umbral Limpieza (mV)", 10, 300, 100)
 
@@ -198,7 +190,6 @@ if archivo and st.button("🚀 PROCESAR"):
                 else:
                     st.error("Seleccione un ducto."); st.stop()
             else:
-                # Modo Básico
                 df_final = df_raw.copy().rename(columns={"On Voltage": "On_V", "Off Voltage": "Off_V"})
                 df_final["On_mV"], df_final["Off_mV"] = df_final["On_V"]*1000, df_final["Off_V"]*1000
                 df_final["Station No"] = np.round(np.linspace(0, 1000, len(df_final)), 2)
