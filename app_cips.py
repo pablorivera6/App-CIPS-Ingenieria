@@ -64,20 +64,20 @@ def cargar_mapa_activos():
     mapa = {}
 
     if not os.path.exists(archivo_infra):
-        # Mensaje de error amigable si no encuentra la carpeta/archivo
+        # Mensaje de error si no encuentra el archivo maestro
         return {"Error": {"Archivo 'ductos/nombres.csv' no encontrado": ""}}
 
     try:
-        # Intentar leer con separador punto y coma (común en español)
+        # Intentar leer con UTF-8 primero (Estándar moderno)
         try:
-            df_infra = pd.read_csv(archivo_infra, sep=';', encoding='latin-1')
+            df_infra = pd.read_csv(archivo_infra, sep=';', encoding='utf-8')
         except:
-            # Si falla, intentar con coma y utf-8
-            df_infra = pd.read_csv(archivo_infra, sep=',', encoding='utf-8')
+            # Si falla (ej. Excel antiguo), intentar con Latin-1
+            df_infra = pd.read_csv(archivo_infra, sep=';', encoding='latin-1')
 
-        # Iteramos por cada fila
+        # Iteramos por cada fila del CSV
         for _, row in df_infra.iterrows():
-            # Limpieza de datos
+            # Limpieza de datos (strip para quitar espacios extra)
             raw_dist = str(row['DISTRITO']).strip().upper()  # Ej: "D1"
             nombre_tramo = str(row['TRAMO']).strip()         # Ej: "Troncal Marsella..."
             id_tramo = str(row['ID TRAMO']).strip()          # Ej: "T_MAOB"
@@ -87,6 +87,7 @@ def cargar_mapa_activos():
             nombre_distrito = f"Distrito {num_dist}"
             
             # RUTA DEL ARCHIVO GPKG (dentro de carpeta ductos)
+            # Buscamos primero con ID exacto.gpkg
             ruta_gpkg = os.path.join(carpeta_base, f"{id_tramo}")
             
             if nombre_distrito not in mapa:
@@ -101,7 +102,7 @@ def cargar_mapa_activos():
         st.error(f"Error leyendo 'nombres.csv': {e}")
         return {}
 
-# Cargamos el mapa al iniciar
+# Cargamos el mapa al iniciar la app
 MAPA_DE_ACTIVOS = cargar_mapa_activos()
 
 # =========================================================
@@ -219,11 +220,12 @@ with st.sidebar:
     st.subheader("1. Selección de Activo")
     
     if "Error" in MAPA_DE_ACTIVOS:
-        st.error("❌ No se encontró la carpeta 'ductos' o el archivo 'nombres.csv'")
+        st.error("❌ No se encontró 'ductos/nombres.csv'")
         distrito_sel = None
         ruta_geo = ""
     else:
-        lista_distritos = list(MAPA_DE_ACTIVOS.keys())
+        # Ordenamos los distritos para que salgan D01, D02...
+        lista_distritos = sorted(list(MAPA_DE_ACTIVOS.keys()))
         distrito_sel = st.selectbox("Distrito", lista_distritos)
         
         ruta_geo = ""
@@ -234,7 +236,7 @@ with st.sidebar:
             # Ruta base viene sin extensión, ej: ductos/T_MAOB
             ruta_base = tramos_dict[ramal_sel]
             
-            # Verificación de existencia del archivo
+            # Verificación de existencia del archivo en GitHub
             if os.path.exists(ruta_base + ".gpkg"):
                 ruta_geo = ruta_base + ".gpkg"
                 st.caption(f"✅ Archivo Geo detectado")
@@ -242,9 +244,9 @@ with st.sidebar:
                 ruta_geo = ruta_base + ".shp"
                 st.caption(f"✅ Archivo Geo detectado (.shp)")
             else:
-                # Ruta dummy
+                # Ruta dummy para que no rompa la app, pero avise
                 ruta_geo = ruta_base + ".gpkg"
-                st.caption(f"❌ Archivo no encontrado en: {ruta_geo}")
+                st.caption(f"❌ Archivo no encontrado: {ruta_base}.gpkg")
 
     st.divider()
     
