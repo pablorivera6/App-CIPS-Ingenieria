@@ -48,29 +48,32 @@ if not check_password():
     st.stop()
 
 # =========================================================
-#  LÓGICA DE INFRAESTRUCTURA (CARGA DINÁMICA)
+#  LÓGICA DE INFRAESTRUCTURA (CARGA DINÁMICA DESDE 'DUCTOS')
 # =========================================================
 
 @st.cache_data
 def cargar_mapa_activos():
     """
-    Lee el CSV de infraestructura y construye el menú automáticamente.
-    Busca archivo: 'Listado de Infraestructura para Cod Informes.csv'
+    Lee el CSV de infraestructura dentro de la carpeta 'ductos'.
+    Ruta esperada: ductos/nombres.csv
     """
-    archivo_infra = "Listado de Infraestructura para Cod Informes.csv"
+    # RUTA ACTUALIZADA
+    carpeta_base = "ductos"
+    archivo_infra = os.path.join(carpeta_base, "nombres.csv")
     
-    # Estructura base por si falla la carga
     mapa = {}
 
     if not os.path.exists(archivo_infra):
-        return {"Error": {"Archivo CSV no encontrado": ""}}
+        # Mensaje de error amigable si no encuentra la carpeta/archivo
+        return {"Error": {"Archivo 'ductos/nombres.csv' no encontrado": ""}}
 
     try:
-        # Intentar leer con separador punto y coma (formato de tu archivo)
+        # Intentar leer con separador punto y coma (común en español)
         try:
             df_infra = pd.read_csv(archivo_infra, sep=';', encoding='latin-1')
         except:
-            df_infra = pd.read_csv(archivo_infra, sep=';', encoding='utf-8')
+            # Si falla, intentar con coma y utf-8
+            df_infra = pd.read_csv(archivo_infra, sep=',', encoding='utf-8')
 
         # Iteramos por cada fila
         for _, row in df_infra.iterrows():
@@ -83,19 +86,19 @@ def cargar_mapa_activos():
             num_dist = raw_dist.replace('D', '').strip().zfill(2)
             nombre_distrito = f"Distrito {num_dist}"
             
-            # La ruta base será activos/ID_TRAMO (la extensión se busca luego)
-            ruta_base = f"activos/{id_tramo}"
+            # RUTA DEL ARCHIVO GPKG (dentro de carpeta ductos)
+            ruta_gpkg = os.path.join(carpeta_base, f"{id_tramo}")
             
             if nombre_distrito not in mapa:
                 mapa[nombre_distrito] = {}
             
-            mapa[nombre_distrito][nombre_tramo] = ruta_base
+            mapa[nombre_distrito][nombre_tramo] = ruta_gpkg
             
         # Ordenamos alfabéticamente
         return dict(sorted(mapa.items()))
         
     except Exception as e:
-        st.error(f"Error cargando listado de infraestructura: {e}")
+        st.error(f"Error leyendo 'nombres.csv': {e}")
         return {}
 
 # Cargamos el mapa al iniciar
@@ -215,27 +218,33 @@ with st.sidebar:
     
     st.subheader("1. Selección de Activo")
     
-    lista_distritos = list(MAPA_DE_ACTIVOS.keys())
-    distrito_sel = st.selectbox("Distrito", lista_distritos)
-    
-    ruta_geo = ""
-    if distrito_sel:
-        tramos_dict = MAPA_DE_ACTIVOS[distrito_sel]
-        ramal_sel = st.selectbox("Ramal / Sector", list(tramos_dict.keys()))
+    if "Error" in MAPA_DE_ACTIVOS:
+        st.error("❌ No se encontró la carpeta 'ductos' o el archivo 'nombres.csv'")
+        distrito_sel = None
+        ruta_geo = ""
+    else:
+        lista_distritos = list(MAPA_DE_ACTIVOS.keys())
+        distrito_sel = st.selectbox("Distrito", lista_distritos)
         
-        # Lógica para detectar extensión (.gpkg o .shp)
-        ruta_base = tramos_dict[ramal_sel]
-        
-        if os.path.exists(ruta_base + ".gpkg"):
-            ruta_geo = ruta_base + ".gpkg"
-            st.caption(f"✅ Archivo Geo detectado (.gpkg)")
-        elif os.path.exists(ruta_base + ".shp"):
-            ruta_geo = ruta_base + ".shp"
-            st.caption(f"✅ Archivo Geo detectado (.shp)")
-        else:
-            # Ruta dummy para que falle controlado y vaya a manual
-            ruta_geo = ruta_base + ".gpkg"
-            st.caption("❌ Archivo de línea no encontrado en GitHub")
+        ruta_geo = ""
+        if distrito_sel:
+            tramos_dict = MAPA_DE_ACTIVOS[distrito_sel]
+            ramal_sel = st.selectbox("Ramal / Sector", list(tramos_dict.keys()))
+            
+            # Ruta base viene sin extensión, ej: ductos/T_MAOB
+            ruta_base = tramos_dict[ramal_sel]
+            
+            # Verificación de existencia del archivo
+            if os.path.exists(ruta_base + ".gpkg"):
+                ruta_geo = ruta_base + ".gpkg"
+                st.caption(f"✅ Archivo Geo detectado")
+            elif os.path.exists(ruta_base + ".shp"):
+                ruta_geo = ruta_base + ".shp"
+                st.caption(f"✅ Archivo Geo detectado (.shp)")
+            else:
+                # Ruta dummy
+                ruta_geo = ruta_base + ".gpkg"
+                st.caption(f"❌ Archivo no encontrado en: {ruta_geo}")
 
     st.divider()
     
@@ -277,7 +286,7 @@ def procesar_archivo_completo(uploaded_file, ruta_geo, umbral, ventana_det, apli
     # B. Procesamiento Geoespacial
     usar_metodo_manual = False
     
-    if os.path.exists(ruta_geo):
+    if ruta_geo and os.path.exists(ruta_geo):
         with st.status("🗺️ Realizando alineación geoespacial...", expanded=True) as status:
             st.write(f"Procesando contra: {os.path.basename(ruta_geo)}")
             df_survey, error = procesar_geometria_lrs(df_survey, ruta_geo)
@@ -291,7 +300,7 @@ def procesar_archivo_completo(uploaded_file, ruta_geo, umbral, ventana_det, apli
                 st.write("✅ Coordenadas corregidas.")
                 status.update(label="Procesamiento Geo Exitoso", state="complete")
     else:
-        st.warning(f"⚠️ No se encontró el archivo de referencia geográfico. Usando modo manual.")
+        st.warning(f"⚠️ No se encontró el archivo de referencia geográfico ({ruta_geo}). Usando modo manual.")
         usar_metodo_manual = True
 
     # C. Procesamiento Manual (Fallback)
