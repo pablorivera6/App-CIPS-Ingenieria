@@ -1,11 +1,10 @@
 streamlit
 pandas
 numpy
-openpyxl
 altair
+openpyxl
 geopandas
 shapely
 pyproj
 scikit-learn
-fiona
-rtree
+matplotlib
