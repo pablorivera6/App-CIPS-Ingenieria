@@ -4,6 +4,7 @@ import numpy as np
 import io
 import os
 import altair as alt
+from datetime import datetime
 
 # Librerías Geoespaciales
 import geopandas as gpd
@@ -11,6 +12,62 @@ from shapely.ops import linemerge
 from shapely.geometry import LineString, MultiLineString
 from pyproj import Transformer
 from sklearn.linear_model import LinearRegression
+
+# =========================================================
+#  NUEVA FUNCIÓN: SUBIDA A SHAREPOINT
+# =========================================================
+
+def subir_a_sharepoint(file_bytes, nombre_archivo):
+    """
+    Sube un archivo (bytes) a una carpeta específica de SharePoint.
+    Usa credenciales almacenadas en st.secrets.
+    
+    Requiere: pip install Office365-REST-Python-Client
+    
+    Configuración en .streamlit/secrets.toml:
+    [sharepoint]
+    site_url = "https://tuempresa.sharepoint.com/sites/TuSitio"
+    client_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+    client_secret = "tu_client_secret"
+    carpeta_destino = "Documentos compartidos/CIPS_Procesados"
+    """
+    try:
+        from office365.runtime.auth.client_credential import ClientCredential
+        from office365.sharepoint.client_context import ClientContext
+    except ImportError:
+        return False, "Librería no instalada. Ejecuta: pip install Office365-REST-Python-Client"
+    
+    try:
+        # Leer credenciales desde Streamlit Secrets
+        site_url = st.secrets["sharepoint"]["site_url"]
+        client_id = st.secrets["sharepoint"]["client_id"]
+        client_secret = st.secrets["sharepoint"]["client_secret"]
+        carpeta_destino = st.secrets["sharepoint"]["carpeta_destino"]
+        
+        # Autenticación
+        credentials = ClientCredential(client_id, client_secret)
+        ctx = ClientContext(site_url).with_credentials(credentials)
+        
+        # Subir archivo a la carpeta
+        folder = ctx.web.get_folder_by_server_relative_url(carpeta_destino)
+        folder.upload_file(nombre_archivo, file_bytes).execute_query()
+        
+        return True, f"Archivo '{nombre_archivo}' subido exitosamente a SharePoint."
+    
+    except KeyError:
+        return False, "Credenciales de SharePoint no configuradas. Revisa .streamlit/secrets.toml"
+    except Exception as e:
+        return False, f"Error al subir a SharePoint: {str(e)}"
+
+
+def generar_nombre_archivo(distrito, ramal):
+    """Genera un nombre dinámico para el archivo: CIPS_Distrito01_Ramal_2026-03-18.xlsx"""
+    fecha = datetime.now().strftime("%Y-%m-%d")
+    # Limpiar caracteres problemáticos para nombres de archivo
+    distrito_limpio = distrito.replace(" ", "").replace("/", "-") if distrito else "SinDistrito"
+    ramal_limpio = ramal.replace(" ", "_").replace("/", "-") if ramal else "SinRamal"
+    return f"CIPS_{distrito_limpio}_{ramal_limpio}_{fecha}.xlsx"
+
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Portal Ingeniería CIPS", page_icon="🔒", layout="wide")
@@ -218,6 +275,7 @@ with st.sidebar:
     if "Error" in MAPA_DE_ACTIVOS:
         st.error("❌ No se encontró 'ductos/nombres.csv'")
         distrito_sel = None
+        ramal_sel = None
         ruta_geo = ""
     else:
         # Ordenamos los distritos
@@ -225,6 +283,7 @@ with st.sidebar:
         distrito_sel = st.selectbox("Distrito", lista_distritos)
         
         ruta_geo = ""
+        ramal_sel = None
         if distrito_sel:
             tramos_dict = MAPA_DE_ACTIVOS[distrito_sel]
             ramal_sel = st.selectbox("Ramal / Sector", list(tramos_dict.keys()))
@@ -400,6 +459,11 @@ if archivo is not None:
         if df_final is not None:
             st.success("✅ Procesamiento Completado Exitosamente")
             
+            # Guardar en session_state para que los botones funcionen después
+            st.session_state["df_final"] = df_final
+            st.session_state["hojas_guardadas"] = hojas_guardadas
+            st.session_state["log"] = log
+            
             # --- GRÁFICA ---
             st.subheader("📊 Perfil de Potenciales (Vista Previa)")
             
@@ -427,22 +491,54 @@ if archivo is not None:
             c1.metric("Datos Suavizados (ON)", log.get('On Voltage', 0))
             c2.metric("Datos Suavizados (OFF)", log.get('Off Voltage', 0))
             
-            # --- GENERACIÓN EXCEL ---
+            # --- GENERACIÓN EXCEL EN BUFFER ---
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-                # 1. Hoja Procesada
                 df_final.to_excel(writer, sheet_name="Survey Data Procesada", index=False)
-                
-                # 2. Restaurar hojas originales
                 if hojas_guardadas:
                     for nombre_hoja, df_hoja in hojas_guardadas.items():
                         df_hoja.to_excel(writer, sheet_name=nombre_hoja, index=False)
             
+            # Guardar buffer en session_state
+            st.session_state["excel_buffer"] = buffer.getvalue()
+
+    # =============================================================
+    #  BOTONES DE DESCARGA Y ENVÍO (FUERA DEL if st.button)
+    #  Se muestran siempre que haya datos procesados en sesión
+    # =============================================================
+    if "excel_buffer" in st.session_state:
+        
+        nombre_dinamico = generar_nombre_archivo(
+            distrito_sel if distrito_sel else "SinDistrito",
+            ramal_sel if ramal_sel else "SinRamal"
+        )
+        
+        st.markdown("---")
+        st.subheader("📤 Exportar Resultados")
+        
+        col_desc, col_sp = st.columns(2)
+        
+        with col_desc:
             st.download_button(
-                label="📥 DESCARGAR REPORTE OFICIAL",
-                data=buffer.getvalue(),
-                file_name="Reporte_CIPS_Procesado.xlsx",
+                label="📥 DESCARGAR REPORTE",
+                data=st.session_state["excel_buffer"],
+                file_name=nombre_dinamico,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
                 type="primary"
             )
+        
+        with col_sp:
+            if st.button("☁️ ENVIAR A SHAREPOINT", use_container_width=True, type="secondary"):
+                with st.spinner(f"Subiendo '{nombre_dinamico}' a SharePoint..."):
+                    exito, mensaje = subir_a_sharepoint(
+                        st.session_state["excel_buffer"],
+                        nombre_dinamico
+                    )
+                if exito:
+                    st.success(f"✅ {mensaje}")
+                    st.balloons()
+                else:
+                    st.error(f"❌ {mensaje}")
+        
+        st.caption(f"📄 Archivo: `{nombre_dinamico}`")
